@@ -2,128 +2,91 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<title>드래그 이미지 — 모바일 잔상 제거 + 고른 랜덤 배치</title>
+<title>드래그 이미지 — 프레임 통일(랜덤 분포)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
+  /* ===== 커스터마이즈 포인트 =====
+     1) 전체 프레임 크기: .frame { max-width: 10vw; } ← 여기 숫자만 바꾸면 됨
+     2) 겹침 정도: JS의 ALLOW_OVERLAP (px) 값 조절
+     3) 화면 가장자리 여백: JS의 PAD_RATIO 값 조절
+  ================================== */
+
   html, body{
     margin:0; padding:0; height:100%;
-    background: aliceblue;
+    background:#fff;
     overflow:hidden;
-    touch-action:none; /* 터치 스크롤/줌 방지(드래그 안정화) */
-    -webkit-tap-highlight-color: transparent; /* iOS 탭 하이라이트 제거 */
-  }
-  *{
     -webkit-user-select:none; user-select:none;
-    -webkit-touch-callout:none;
+    touch-action:none; /* 모바일 드래그 잔상/스크롤 억제 */
   }
-  img, .draggable-wrapper, .thumb, .thumb .art{
-    -webkit-user-drag:none; user-drag:none; /* iOS 드래그 고스트 차단 */
-  }
+  #draggableSection{ position:relative; width:100vw; height:100vh; overflow:hidden; }
 
-  #draggableSection{
-    position:relative; width:100vw; height:100vh; overflow:hidden;
-  }
-
-  /* 상단 체크 필터 (투박한 체크박스) */
+  /* 상단 체크 필터 */
   .filter-bar{
     position:absolute; top:10px; left:50%; transform:translateX(-50%);
     z-index:1000; color:#4d4d4d;
     padding:6px 10px; border-radius:10px; display:flex; gap:14px;
     font:600 12px/1 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
     backdrop-filter: blur(6px);
-    background: rgba(255,255,255,.35);
-    border: 1px solid rgba(0,0,0,.08);
   }
   .filter-bar label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
   .filter-bar input{ width:14px; height:14px; }
 
-  /* 아이템 */
+  /* 아이템(배경창) — 폭은 JS에서 UNIFY_W로 통일 설정 */
   .draggable-wrapper{
-    position:absolute; display:flex; align-items:center; user-select:none;
-    cursor:grab; z-index:10;
-    width:var(--item-size-default, 10vw);
-    will-change: transform, left, top; /* 드래그 중 부드럽게 */
+    position:absolute; display:flex; align-items:center;
+    user-select:none; cursor:grab; z-index:10;
+    -webkit-user-drag:none; touch-action:none;
+    max-width:none;
   }
   .draggable-wrapper.grabbing{ cursor:grabbing; }
 
   .thumb{
-    position:relative; width:100%; display:inline-block; max-width: 75%;
+    position:relative; width:100%; display:inline-block;
     /* 맥 창 느낌의 그림자 */
-    filter: drop-shadow(0 18px 40px rgba(0,0,0,.30)) drop-shadow(0 3px 10px rgba(0,0,0,.22));
+    filter: drop-shadow(0 20px 44px rgba(0,0,0,.28))
+            drop-shadow(0 4px 10px rgba(0,0,0,.22));
   }
-  .thumb .frame{ width:100%; height:auto; display:block; pointer-events:none; }
 
-  /* 프레임 내부 안전영역 */
-  .thumb .art{
+  /* 프레임: PNG 배경, 비율은 CSS 변수로 통일 */
+  .frame{
+    width:100%;
+    max-width:10vw;                     /* ★ 요청: 프레임 최대너비 10vw */
+    aspect-ratio: var(--frame-ar, 1200/1000);
+    background: var(--frame-bg) center/100% 100% no-repeat;
+    position:relative;
+  }
+
+  /* 프레임 내부 안전영역(상단바/하단 그림자 피하기) */
+  .art{
     position:absolute;
-    --inset-top:15%; --inset-right:10%; --inset-bottom:10%; --inset-left:10%;
-    top:var(--inset-top); right:var(--inset-right);
-    bottom:var(--inset-bottom); left:var(--inset-left);
+    inset: var(--inset-top,15%) var(--inset-right,10%)
+           var(--inset-bottom,10%) var(--inset-left,10%);
     display:flex; align-items:center; justify-content:center;
-    overflow:hidden; pointer-events:none; background:transparent;
+    overflow:hidden; pointer-events:none;
   }
-  .thumb .art img{ max-width:100%; max-height:100%; width:auto; height:auto; display:block; }
+  .art img{
+    max-width:100%; max-height:100%;
+    width:auto; height:auto; display:block;
+    -webkit-user-drag:none; user-drag:none; pointer-events:none;
+  }
 
-  /* 보이지 않는 코너 리사이즈 핫영역 */
+  /* 코너 리사이즈 핫영역(표시 X) */
   .resize-corner{
     position:absolute; right:0; bottom:0; width:18px; height:18px;
     pointer-events:auto; background:transparent;
   }
 
-  /* 제거용 구멍 */
+  /* 구멍 */
   .hole-area{
     position:absolute; bottom:10px; right:40px;
     font-size:140px; pointer-events:none; z-index:5;
   }
-
-  /* ===== 개별 폭 오버라이드(필요 시 조정) ===== */
-  .img-N0TBWZP{width:15vw}.img-jZc9E5a{width:12vw}.img-d41PtBI{width:8vw}
-  .img-qBOCOTT{width:18vw}.img-Cl9eFr5{width:10vw}.img-ijesB8N{width:20vw}
-  .img-dRIwmfM{width:9.5vw}.img-4giNzpA{width:12vw}.img-rdRSnS1{width:12vw}
-  .img-WGeDvn2{width:12vw}.img-6wzn6e3{width:25vw}.img-1rvAWro{width:15.5vw}
-  .img-tKIIpBq{width:11vw}.img-qPu22yR{width:20vw}.img-tzJYned{width:15.5vw}
-  .img-Dku5N18{width:7vw}.img-zM8d6tk{width:10vw}.img-E5n1OcX{width:10vw}
-  .img-bShUtJp{width:24vw}.img-4TUJn6x{width:10vw}.img-YIMvYed{width:10vw}
-  .img-SqjbaNc{width:18vw}.img-RUGNwRk{width:22vw}.img-aEIP80D{width:18vw}
-  .img-emwcull{width:15vw}.img-gjj4zas{width:12vw}
-
-  /* ====== 확대 오버레이 ====== */
-  #zoomOverlay{
-    position:fixed; inset:0; background:rgba(0,0,0,.6);
-    display:none; align-items:center; justify-content:center;
-    z-index:2000;
-  }
-  #zoomOverlay.show{ display:flex; }
-  #zoomOverlay img{
-    max-width: min(90vw, 1200px);
-    max-height: 90vh;
-    width:auto; height:auto; display:block;
-    box-shadow: 0 16px 36px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3);
-    border-radius: 6px;
-  }
-
-  /* ====== 확인 모달 ====== */
-  #confirmModal{
-    position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:2100;
-  }
-  #confirmModal.show{ display:flex; }
-  .dialog{
-    background:#fff; color:#222; border-radius:12px; min-width:260px; max-width:80vw;
-    box-shadow: 0 12px 30px rgba(0,0,0,.28);
-    padding:18px 16px;
-    font: 500 14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
-  }
-  .dialog p{ margin: 4px 4px 14px; white-space:nowrap; }
-  .buttons{ display:flex; gap:10px; justify-content:flex-end; }
-  .buttons button{
-    border:none; border-radius:8px; padding:9px 14px; cursor:pointer; font-weight:600;
-  }
-  .buttons .yes{ background:#222; color:#fff; }
-  .buttons .no{ background:#ececec; color:#222; }
+  /* 모바일(터치)에서는 구멍 숨김 */
+  @media (hover:none) and (pointer:coarse){ .hole-area{ display:none !important; } }
 </style>
 </head>
 <body>
   <div id="draggableSection">
-    <!-- 체크 필터 -->
     <div class="filter-bar">
       <label><input type="checkbox" data-filter="png"> PNG</label>
       <label><input type="checkbox" data-filter="gif"> GIF</label>
@@ -132,26 +95,23 @@
     <div class="hole-area">🕳️</div>
   </div>
 
-  <!-- 확대 오버레이 -->
-  <div id="zoomOverlay"><img id="zoomImg" src="" alt=""></div>
-
-  <!-- 확인 모달 -->
-  <div id="confirmModal">
-    <div class="dialog">
-      <p>구경하러 다녀옵니다🚪</p>
-      <div class="buttons">
-        <button class="no" id="confirmNo">아니오</button>
-        <button class="yes" id="confirmYes">예</button>
-      </div>
-    </div>
-  </div>
-
 <script>
 (() => {
   const section = document.getElementById('draggableSection');
   const hole = document.querySelector('.hole-area');
-  const FRAME_SRC = 'https://i.imgur.com/Sgwt5Hy.png';
 
+  /* ===== 설정 ===== */
+  const FRAME_SRC = 'https://i.imgur.com/Sgwt5Hy.png';  // 배경창 PNG(상단바 포함)
+  const UNIFY_W   = '10vw';                             // ★ 모든 프레임 공통 폭 (프레임 max-width와 맞춤)
+  const PAD_RATIO = 0.06;                               // 화면 가장자리 여백 비율(조금 넉넉히)
+  const ALLOW_OVERLAP = 8;                              // 허용 겹침 px (모서리만 살짝 겹치게)
+  const RELAX_PASSES  = 30;                             // 겹침 완화 반복 횟수
+
+  // 모바일이라면 구멍 제거
+  const IS_TOUCH = matchMedia('(hover:none) and (pointer:coarse)').matches;
+  if (IS_TOUCH && hole) hole.remove();
+
+  // 이미지 목록
   const imageSources = [
     "https://imgur.com/N0TBWZP","https://imgur.com/jZc9E5a","https://imgur.com/d41PtBI",
     "https://imgur.com/qBOCOTT","https://imgur.com/Cl9eFr5","https://imgur.com/ijesB8N",
@@ -173,306 +133,211 @@
     'Dku5N18':'https://www.instagram.com/senseiwillfixit/'
   };
 
-  // 전역: 기본 드래그(브라우저 DnD) 차단 -> iOS 고스트 이미지 제거
-  document.addEventListener('dragstart', e => e.preventDefault(), {passive:false});
-
-  // 셔플
-  for(let i=imageSources.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[imageSources[i],imageSources[j]]=[imageSources[j],imageSources[i]];}
-
-  const wraps=[];        // DOM 래퍼들 (필터/이벤트용)
-  const layoutItems=[];  // {wrap,w,h} 레이아웃 계산용
-  let zTop=100;
-  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
-
+  // ===== 유틸 =====
+  const clamp=(v,min,max)=>Math.max(min,Math.min(v,max));
+  function ptr(e){
+    const p=('touches' in e)? e.touches[0]:e;
+    const r=section.getBoundingClientRect();
+    return { x:p.clientX-r.left, y:p.clientY-r.top, clientX:p.clientX, clientY:p.clientY };
+  }
   function normUrl(u){
     let src=u.trim();
     if(!src.includes('i.imgur.com')) src=src.replace('imgur.com/','i.imgur.com/');
     if(!/\.(png|jpg|jpeg|gif)$/i.test(src)) src+='.png';
     return src;
   }
-  function clamp(v,min,max){ return Math.max(min, Math.min(v, max)); }
 
-  // 확대 오버레이 / 확인 모달
-  const zoomOverlay = document.getElementById('zoomOverlay');
-  const zoomImg     = document.getElementById('zoomImg');
-  const confirmModal= document.getElementById('confirmModal');
-  const yesBtn = document.getElementById('confirmYes');
-  const noBtn  = document.getElementById('confirmNo');
-
-  let currentZoomLink = null;
-  let overlayOpen = false;
-
-  function openZoom(src, link=null){
-    currentZoomLink = link || null;
-    zoomImg.src = src;
-    zoomOverlay.classList.add('show');
-    overlayOpen = true;
-  }
-  function closeZoom(){
-    zoomOverlay.classList.remove('show');
-    confirmModal.classList.remove('show');
-    zoomImg.src = '';
-    currentZoomLink = null;
-    overlayOpen = false;
-  }
-  function askGoOut(){ confirmModal.classList.add('show'); }
-  zoomOverlay.addEventListener('click', () => {
-    if (currentZoomLink) askGoOut();
-    else closeZoom();
-  });
-  yesBtn.addEventListener('click', () => { if (currentZoomLink) window.location.href = currentZoomLink; closeZoom(); });
-  noBtn.addEventListener('click', () => { closeZoom(); });
-  document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && overlayOpen){ closeZoom(); }});
-
-  // 생성
-  let readyCount = 0;
-  imageSources.forEach(raw=>{
-    const src=normUrl(raw);
-    const file=src.split('/').pop();
-    const key=file.split('.')[0];
-    const ext=file.split('.').pop().toLowerCase();
-
-    const wrap=document.createElement('div');
-    wrap.className='draggable-wrapper img-'+key;
-    wrap.dataset.ext=ext;
-    if(linkMap[key]) wrap.dataset.link='1';
-
-    const thumb=document.createElement('div'); thumb.className='thumb';
-    const frame=document.createElement('img'); frame.className='frame'; frame.src=FRAME_SRC; frame.alt='frame';
-    const art=document.createElement('div'); art.className='art';
-    const img=document.createElement('img'); img.src=src; img.alt=key; img.draggable=false;
-    const corner=document.createElement('div'); corner.className='resize-corner';
-
-    // 기본 드래그 차단(추가 안전)
-    img.addEventListener('dragstart', e=>e.preventDefault());
-
-    art.appendChild(img); thumb.append(frame,art,corner); wrap.append(thumb); section.appendChild(wrap);
-
-    frame.addEventListener('load', ()=>{
-      // 크기 측정 후, 나중에 일괄 배치
-      layoutItems.push({wrap, key, ext, w:wrap.offsetWidth, h:wrap.offsetHeight});
-      readyCount++;
-      if(readyCount===imageSources.length){
-        if(isTouch){
-          // 모바일: 기존 랜덤 배치(살짝 여백만)
-          randomScatter(layoutItems);
-        }else{
-          // 웹: 고른 랜덤 배치
-          blueNoiseScatter(layoutItems);
-        }
-      }
-    });
-
-    /* === 포인터 이벤트로 통일 (잔상 제거 + 겹침 드래그 방지) === */
-    let mode = null; // 'drag' | 'resize' | null
-    let startX=0, startY=0, startLeft=0, startTop=0, startWidth=0;
-    let lastTX=0, lastTY=0; // transform 델타
-    const CLICK_THRESHOLD = 4;
-
-    function inCorner(ev){
-      const rect=wrap.getBoundingClientRect();
-      const thr=18;
-      const x = ev.clientX, y = ev.clientY;
-      return (x>=rect.right-thr && y>=rect.bottom-thr);
-    }
-
-    wrap.addEventListener('pointerdown', (e)=>{
-      if (overlayOpen) return;
-      wrap.setPointerCapture(e.pointerId);
-      wrap.style.zIndex = ++zTop;
-
-      startX = e.clientX; startY = e.clientY;
-      startLeft = wrap.offsetLeft; startTop = wrap.offsetTop; startWidth = wrap.offsetWidth;
-      lastTX = 0; lastTY = 0;
-
-      if (inCorner(e)){
-        mode = 'resize';
-        document.body.style.cursor='nwse-resize';
-      } else {
-        mode = 'drag';
-        wrap.classList.add('grabbing');
-      }
-      e.preventDefault();
-    });
-
-    wrap.addEventListener('pointermove', (e)=>{
-      if (!wrap.hasPointerCapture(e.pointerId) || !mode) return;
-
-      if (mode === 'drag'){
-        // 목표 절대 좌표
-        const desiredLeft = startLeft + (e.clientX - startX);
-        const desiredTop  = startTop  + (e.clientY - startY);
-        const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
-        const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
-        const clampedLeft = clamp(desiredLeft, 0, maxX);
-        const clampedTop  = clamp(desiredTop , 0, maxY);
-
-        // transform으로 부드럽게 이동 (업 때만 left/top 반영)
-        lastTX = clampedLeft - startLeft;
-        lastTY = clampedTop  - startTop;
-        wrap.style.transform = `translate3d(${lastTX}px, ${lastTY}px, 0)`;
-
-        // 구멍 안에서만 50% 투명
-        const holeRect = hole.getBoundingClientRect();
-        const inside = (e.clientX>=holeRect.left && e.clientX<=holeRect.right && e.clientY>=holeRect.top && e.clientY<=holeRect.bottom);
-        wrap.style.opacity = inside ? '0.5' : '1';
-
-      } else if (mode === 'resize'){
-        const dx = e.clientX - startX;
-        let newW = Math.max(120, startWidth + dx);
-        wrap.style.width = newW + 'px';
-
-        // 리사이즈 중 경계 클램프
-        const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
-        const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
-        const cl = clamp(wrap.offsetLeft, 0, maxX);
-        const ct = clamp(wrap.offsetTop , 0, maxY);
-        wrap.style.left = cl + 'px';
-        wrap.style.top  = ct + 'px';
-      }
-    });
-
-    wrap.addEventListener('pointerup', (e)=>{
-      if (!mode) return;
-      const moved = Math.abs(e.clientX-startX)+Math.abs(e.clientY-startY);
-      const wasClick = moved <= CLICK_THRESHOLD;
-
-      if (mode === 'drag'){
-        // transform을 실제 좌표로 커밋
-        const finalLeft = startLeft + lastTX;
-        const finalTop  = startTop  + lastTY;
-        wrap.style.transform = '';
-        wrap.style.left = finalLeft + 'px';
-        wrap.style.top  = finalTop  + 'px';
-        wrap.classList.remove('grabbing');
-        wrap.style.opacity='1';
-
-        // 드롭-투-홀 (드래그일 때만)
-        const holeRect = hole.getBoundingClientRect();
-        const inside = (e.clientX>=holeRect.left && e.clientX<=holeRect.right && e.clientY>=holeRect.top && e.clientY<=holeRect.bottom);
-        if (!wasClick && inside){
-          wrap.style.transition='opacity .22s ease, transform .22s ease';
-          wrap.style.opacity='0'; wrap.style.transform='scale(.1)';
-          setTimeout(()=>wrap.remove(),220);
-        }
-      }
-
-      // 클릭: 확대 → (링크 있으면) 오버레이에서 확인 후 이동
-      if (wasClick){
-        const link = linkMap[key] || null;
-        openZoom(img.src, link);
-      }
-
-      mode = null;
-      document.body.style.cursor='';
-      wrap.releasePointerCapture(e.pointerId);
-    });
-
-    wraps.push(wrap);
-  });
-
-  /* ======= 배치 알고리즘 ======= */
-
-  // 모바일: 간단 랜덤(여백 포함)
-  function randomScatter(items){
-    const W = section.clientWidth, H = section.clientHeight;
-    const padX = W*0.05, padY = H*0.05;
-    items.forEach(it=>{
-      const w = it.wrap.offsetWidth, h = it.wrap.offsetHeight;
-      const spanW = Math.max(1, W - padX*2 - w);
-      const spanH = Math.max(1, H - padY*2 - h);
+  // 초기 랜덤 배치 (패딩 안에서 균등 랜덤) → 이후 겹침 완화
+  function initialRandom(wraps){
+    const W=section.clientWidth, H=section.clientHeight;
+    const padX=W*PAD_RATIO, padY=H*PAD_RATIO;
+    wraps.forEach(el=>{
+      const w=el.offsetWidth, h=el.offsetHeight;
+      const spanW=Math.max(1, W - padX*2 - w);
+      const spanH=Math.max(1, H - padY*2 - h);
       const x = padX + Math.random()*spanW;
       const y = padY + Math.random()*spanH;
-      it.wrap.style.left = x+'px';
-      it.wrap.style.top  = y+'px';
+      el.style.left = x+'px';
+      el.style.top  = y+'px';
     });
   }
 
-  // 웹: 지터 그리드 + 가벼운 충돌 완화
-  function blueNoiseScatter(items){
-    const W = section.clientWidth, H = section.clientHeight;
-    const n = items.length;
-    const cols = Math.ceil(Math.sqrt(n * (W/H)));
-    const rows = Math.ceil(n / cols);
-    const cellW = W/cols, cellH = H/rows;
-
-    // 셀 센터 후보 생성 (약간 지터)
-    const centers = [];
-    for(let r=0;r<rows;r++){
-      for(let c=0;c<cols;c++){
-        const cx = (c + 0.5 + (Math.random()-0.5)*0.4) * cellW;
-        const cy = (r + 0.5 + (Math.random()-0.5)*0.4) * cellH;
-        centers.push({x:cx, y:cy});
-      }
-    }
-    // 섞고, 아이템 큰 것(면적)부터 배치
-    centers.sort(()=>Math.random()-0.5);
-    const sorted = [...items].sort((a,b)=>(b.w*b.h)-(a.w*a.h));
-
-    sorted.forEach((it,i)=>{
-      const pos = centers[i % centers.length];
-      const w = it.wrap.offsetWidth, h = it.wrap.offsetHeight;
-      let x = clamp(pos.x - w/2, 0, W - w);
-      let y = clamp(pos.y - h/2, 0, H - h);
-      it.wrap.style.left = x+'px';
-      it.wrap.style.top  = y+'px';
-    });
-
-    // 간단한 완화 2~3회: 겹치면 반씩 밀어냄
-    const passes = 3;
+  // 겹침 완화(허용 겹침 남기고 밀어냄)
+  function relax(wraps, passes=RELAX_PASSES, allow=ALLOW_OVERLAP){
+    const W=section.clientWidth, H=section.clientHeight, n=wraps.length;
     for(let p=0;p<passes;p++){
+      let moved=false;
       for(let i=0;i<n;i++){
+        const a=wraps[i], ar={x:a.offsetLeft,y:a.offsetTop,w:a.offsetWidth,h:a.offsetHeight};
         for(let j=i+1;j<n;j++){
-          const a = items[i].wrap.getBoundingClientRect();
-          const b = items[j].wrap.getBoundingClientRect();
-          // 같은 부모라 좌표계 동일(뷰포트 기준) → section 기준으로 재계산
-          const ar = {x: items[i].wrap.offsetLeft, y: items[i].wrap.offsetTop, w:a.width, h:a.height};
-          const br = {x: items[j].wrap.offsetLeft, y: items[j].wrap.offsetTop, w:b.width, h:b.height};
-
-          if (ar.x < br.x+br.w && ar.x+ar.w > br.x && ar.y < br.y+br.h && ar.y+ar.h > br.y){
-            // 겹침 → 가벼운 분리
-            const overlapX = Math.min(ar.x+ar.w - br.x, br.x+br.w - ar.x);
-            const overlapY = Math.min(ar.y+ar.h - br.y, br.y+br.h - ar.y);
-            if (overlapX < overlapY){
-              const dx = overlapX/2 + 2;
-              const dir = (ar.x < br.x) ? -1 : 1;
-              const ax = clamp(ar.x + dir*dx, 0, W - ar.w);
-              const bx = clamp(br.x - dir*dx, 0, W - br.w);
-              items[i].wrap.style.left = ax+'px';
-              items[j].wrap.style.left = bx+'px';
-            } else {
-              const dy = overlapY/2 + 2;
-              const dir = (ar.y < br.y) ? -1 : 1;
-              const ay = clamp(ar.y + dir*dy, 0, H - ar.h);
-              const by = clamp(br.y - dir*dy, 0, H - br.h);
-              items[i].wrap.style.top = ay+'px';
-              items[j].wrap.style.top = by+'px';
+          const b=wraps[j], br={x:b.offsetLeft,y:b.offsetTop,w:b.offsetWidth,h:b.offsetHeight};
+          if(ar.x < br.x+br.w && ar.x+ar.w > br.x && ar.y < br.y+br.h && ar.y+ar.h > br.y){
+            const ox = Math.min(ar.x+ar.w - br.x, br.x+br.w - ar.x);
+            const oy = Math.min(ar.y+ar.h - br.y, br.y+br.h - ar.y);
+            if(ox<=0 || oy<=0) continue;
+            if(ox < oy){
+              const push = Math.max(0, ox - allow)/2 + 0.5;
+              const dir  = (ar.x < br.x) ? -1 : 1;
+              ar.x = clamp(ar.x + dir*push, 0, W-ar.w);
+              br.x = clamp(br.x - dir*push, 0, W-br.w);
+            }else{
+              const push = Math.max(0, oy - allow)/2 + 0.5;
+              const dir  = (ar.y < br.y) ? -1 : 1;
+              ar.y = clamp(ar.y + dir*push, 0, H-ar.h);
+              br.y = clamp(br.y - dir*push, 0, H-br.h);
             }
+            a.style.left = ar.x+'px'; a.style.top = ar.y+'px';
+            b.style.left = br.x+'px'; b.style.top = br.y+'px';
+            moved=true;
           }
         }
+        // 가장자리 반발(프레임이 화면 밖으로 안나가게)
+        const margin=6;
+        if(ar.x < margin)           { ar.x = margin; a.style.left=ar.x+'px'; moved=true; }
+        if(ar.y < margin)           { ar.y = margin; a.style.top =ar.y+'px'; moved=true; }
+        if(ar.x+ar.w > W-margin)    { ar.x = W-margin-ar.w; a.style.left=ar.x+'px'; moved=true; }
+        if(ar.y+ar.h > H-margin)    { ar.y = H-margin-ar.h; a.style.top =ar.y+'px'; moved=true; }
       }
+      if(!moved) break;
     }
   }
 
-  /* ======= 필터 ======= */
-  const checks = Array.from(document.querySelectorAll('.filter-bar input'));
-  function applyFilter(){
-    const on = new Set(checks.filter(c=>c.checked).map(c=>c.dataset.filter));
-    const showAll = on.size===0;
-    wraps.forEach(w=>{
-      const ext=(w.dataset.ext||'').toLowerCase();
-      const hasLink=w.dataset.link==='1';
-      let visible=showAll;
-      if(!showAll){
-        if(on.has('png') && ext==='png') visible=true;
-        if(on.has('gif') && ext==='gif') visible=true;
-        if(on.has('link') && hasLink)   visible=true;
-      }
-      w.style.display=visible?'block':'none';
-      w.style.pointerEvents=visible?'':'none';
-    });
+  // 보이는 것만 재배치(랜덤 → 완화)
+  function layoutVisible(){
+    const vis = items.filter(el=>el.style.display!=='none');
+    if(!vis.length) return;
+    initialRandom(vis);
+    relax(vis);
   }
-  checks.forEach(c=>c.addEventListener('change',applyFilter));
+
+  // 프레임 PNG 비율을 CSS 변수로 셋업
+  const frameImg = new Image();
+  frameImg.src = FRAME_SRC;
+  frameImg.onload = () => {
+    const fw = frameImg.naturalWidth || 1200;
+    const fh = frameImg.naturalHeight || 1000;
+    const root = document.documentElement;
+    root.style.setProperty('--frame-ar', `${fw} / ${fh}`);
+    root.style.setProperty('--frame-bg', `url("${FRAME_SRC}")`);
+    buildAll();
+  };
+
+  const items=[];
+  function buildAll(){
+    // 셔플
+    for(let i=imageSources.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[imageSources[i],imageSources[j]]=[imageSources[j],imageSources[i]];}
+
+    imageSources.forEach(raw=>{
+      const src=normUrl(raw);
+      const file=src.split('/').pop();
+      const key=file.split('.')[0];
+      const ext=file.split('.').pop().toLowerCase();
+
+      const wrap=document.createElement('div');
+      wrap.className='draggable-wrapper';
+      wrap.dataset.ext=ext; if(linkMap[key]) wrap.dataset.link='1';
+      wrap.style.setProperty('width', UNIFY_W, 'important'); // ★ 전부 동일 폭(=10vw)
+
+      const frame=document.createElement('div'); frame.className='frame';
+      const art=document.createElement('div');   art.className='art';
+      const img=document.createElement('img');   img.src=src; img.alt=key; img.draggable=false;
+      const corner=document.createElement('div'); corner.className='resize-corner';
+
+      art.appendChild(img); frame.append(art,corner); wrap.append(frame); section.appendChild(wrap);
+      items.push(wrap);
+
+      // 드래그
+      let dragging=false, offX=0, offY=0, moved=0;
+      const down=e=>{
+        if(isNearCorner(wrap,e)) return; // 리사이즈 우선
+        dragging=true; wrap.classList.add('grabbing'); wrap.style.zIndex=100+(Date.now()%100000);
+        const p=ptr(e); offX=p.x-wrap.offsetLeft; offY=p.y-wrap.offsetTop; moved=0;
+        e.preventDefault();
+      };
+      const move=e=>{
+        if(!dragging && !resizing){
+          wrap.style.cursor=isNearCorner(wrap,e)?'nwse-resize':(wrap.classList.contains('grabbing')?'grabbing':'grab');
+          return;
+        }
+        if(dragging){
+          const p=ptr(e);
+          let nx=p.x-offX, ny=p.y-offY;
+          const maxX=Math.max(0, section.clientWidth-wrap.offsetWidth);
+          const maxY=Math.max(0, section.clientHeight-wrap.offsetHeight);
+          nx=clamp(nx,0,maxX); ny=clamp(ny,0,maxY);
+          moved += Math.abs(nx-wrap.offsetLeft) + Math.abs(ny-wrap.offsetTop);
+          wrap.style.left=nx+'px'; wrap.style.top=ny+'px';
+
+          if(!IS_TOUCH && hole){
+            const r=hole.getBoundingClientRect();
+            const inside=(p.clientX>=r.left && p.clientX<=r.right && p.clientY>=r.top && p.clientY<=r.bottom);
+            wrap.style.opacity=inside?'0.5':'1';
+          }
+          e.preventDefault();
+        }
+      };
+      const up=e=>{
+        if(dragging){
+          wrap.classList.remove('grabbing'); wrap.style.opacity='1'; dragging=false;
+          const isClick = moved<=4;
+          if(isClick && linkMap[key]) window.location.href = linkMap[key];
+        }
+        if(resizing){ resizing=false; document.body.style.cursor=''; }
+      };
+      wrap.addEventListener('mousedown',down);
+      document.addEventListener('mousemove',move);
+      document.addEventListener('mouseup',up);
+      wrap.addEventListener('touchstart',down,{passive:false});
+      document.addEventListener('touchmove',move,{passive:false});
+      document.addEventListener('touchend',up);
+
+      // 리사이즈(폭 고정비율)
+      let resizing=false, startX=0, baseW=0;
+      function isNearCorner(el,ev){
+        const r=el.getBoundingClientRect(), t=18;
+        const x=('touches'in ev?ev.touches[0].clientX:ev.clientX);
+        const y=('touches'in ev?ev.touches[0].clientY:ev.clientY);
+        return (x>=r.right-t && y>=r.bottom-t);
+      }
+      wrap.addEventListener('mousedown', e=>{
+        if(!isNearCorner(wrap,e)) return;
+        resizing=true; startX=e.clientX; baseW=wrap.offsetWidth; document.body.style.cursor='nwse-resize'; e.preventDefault();
+      });
+      document.addEventListener('mousemove', e=>{
+        if(!resizing) return;
+        const dx=e.clientX-startX; const nw=Math.max(120, baseW+dx);
+        wrap.style.setProperty('width', nw+'px', 'important');
+        const maxX=Math.max(0, section.clientWidth-wrap.offsetWidth);
+        const maxY=Math.max(0, section.clientHeight-wrap.offsetHeight);
+        wrap.style.left = clamp(wrap.offsetLeft,0,maxX)+'px';
+        wrap.style.top  = clamp(wrap.offsetTop ,0,maxY)+'px';
+      });
+    });
+
+    // 첫 레이아웃
+    requestAnimationFrame(layoutVisible);
+
+    // 필터
+    const checks=[...document.querySelectorAll('.filter-bar input')];
+    function applyFilter(){
+      const on=new Set(checks.filter(c=>c.checked).map(c=>c.dataset.filter));
+      const all = on.size===0;
+      const vis=[];
+      items.forEach(w=>{
+        const img=w.querySelector('img');
+        const key=img.src.split('/').pop().split('.')[0];
+        const ext=(img.src.split('.').pop()||'').toLowerCase();
+        const hasLink=!!linkMap[key];
+        let v = all || (on.has('png')&&ext==='png') || (on.has('gif')&&ext==='gif') || (on.has('link')&&hasLink);
+        w.style.display=v?'block':'none';
+        w.style.pointerEvents=v?'':'none';
+        if(v) vis.push(w);
+      });
+      requestAnimationFrame(()=>{ layoutVisible(); });
+    }
+    checks.forEach(c=>c.addEventListener('change',applyFilter));
+    window.addEventListener('resize', ()=>{ requestAnimationFrame(layoutVisible); });
+  }
 })();
 </script>
 </body>
