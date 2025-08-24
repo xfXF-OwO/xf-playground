@@ -2,27 +2,26 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<title>드래그 이미지 with frame safe-area</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>드래그 이미지 with frame safe-area + Zoom→Confirm</title>
 <style>
   html, body{
     margin:0; padding:0; height:100%;
-    background: aliceblue;
+    background:aliceblue;
     overflow:hidden;
-    -webkit-user-select:none; user-select:none;
-    -webkit-touch-callout:none;
   }
   #draggableSection{
     position:relative; width:100vw; height:100vh; overflow:hidden;
   }
 
-  /* 상단 체크 필터 */
+  /* 상단 체크 필터 (투박한 체크박스) */
   .filter-bar{
     position:absolute; top:10px; left:50%; transform:translateX(-50%);
     z-index:1000; color:#4d4d4d;
     padding:6px 10px; border-radius:10px; display:flex; gap:14px;
     font:600 12px/1 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
     backdrop-filter: blur(6px);
+    background: rgba(255,255,255,.35);
+    border: 1px solid rgba(0,0,0,.08);
   }
   .filter-bar label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
   .filter-bar input{ width:14px; height:14px; }
@@ -32,19 +31,17 @@
     position:absolute; display:flex; align-items:center; user-select:none;
     cursor:grab; z-index:10;
     width:var(--item-size-default, 10vw);
-    -webkit-user-drag:none;
   }
   .draggable-wrapper.grabbing{ cursor:grabbing; }
 
   .thumb{
     position:relative; width:100%; display:inline-block;
-    /* 맥 창 느낌의 그림자 (드래그 중엔 끔) */
+    /* 맥 창 느낌의 그림자 */
     filter: drop-shadow(0 16px 36px rgba(0,0,0,.32)) drop-shadow(0 2px 6px rgba(0,0,0,.22));
-    will-change: transform; transform: translateZ(0);
   }
-  .thumb.dragging{ filter:none !important; }
-
   .thumb .frame{ width:100%; height:auto; display:block; pointer-events:none; }
+
+  /* 프레임 내부 안전영역 */
   .thumb .art{
     position:absolute;
     --inset-top:15%; --inset-right:10%; --inset-bottom:10%; --inset-left:10%;
@@ -53,9 +50,9 @@
     display:flex; align-items:center; justify-content:center;
     overflow:hidden; pointer-events:none; background:transparent;
   }
-  .thumb .art img{ max-width:100%; max-height:100%; width:auto; height:auto; display:block; -webkit-user-drag:none; }
+  .thumb .art img{ max-width:100%; max-height:100%; width:auto; height:auto; display:block; }
 
-  /* 우하단 리사이즈 핫영역 */
+  /* 보이지 않는 코너 리사이즈 핫영역(표시 X) */
   .resize-corner{
     position:absolute; right:0; bottom:0; width:18px; height:18px;
     pointer-events:auto; background:transparent;
@@ -67,25 +64,7 @@
     font-size:140px; pointer-events:none; z-index:5;
   }
 
-  /* 모바일에선 구멍 숨김 */
-  @media (max-width: 767px){
-    .hole-area{ display:none; }
-  }
-
-  /* 확대 오버레이(모바일 탭 확대/축소용) */
-  #zoomOverlay[hidden]{ display:none; }
-  #zoomOverlay{
-    position:fixed; inset:0; z-index:2000;
-    display:flex; align-items:center; justify-content:center;
-    background: rgba(0,0,0,.28);
-    -webkit-tap-highlight-color: transparent;
-  }
-  #zoomOverlay img{
-    max-width:88vw; max-height:88vh; width:auto; height:auto; display:block;
-    box-shadow: 0 16px 36px rgba(0,0,0,.35), 0 2px 6px rgba(0,0,0,.22);
-  }
-
-  /* ---- 개별 폭 오버라이드 ---- */
+  /* ===== 개별 폭 오버라이드 ===== */
   .img-N0TBWZP{width:15vw}.img-jZc9E5a{width:12vw}.img-d41PtBI{width:8vw}
   .img-qBOCOTT{width:18vw}.img-Cl9eFr5{width:10vw}.img-ijesB8N{width:20vw}
   .img-dRIwmfM{width:9.5vw}.img-4giNzpA{width:12vw}.img-rdRSnS1{width:12vw}
@@ -95,6 +74,41 @@
   .img-bShUtJp{width:24vw}.img-4TUJn6x{width:10vw}.img-YIMvYed{width:10vw}
   .img-SqjbaNc{width:18vw}.img-RUGNwRk{width:22vw}.img-aEIP80D{width:18vw}
   .img-emwcull{width:15vw}.img-gjj4zas{width:12vw}
+
+  /* ====== 확대 오버레이 ====== */
+  #zoomOverlay{
+    position:fixed; inset:0; background:rgba(0,0,0,.6);
+    display:none; align-items:center; justify-content:center;
+    z-index:2000;
+  }
+  #zoomOverlay.show{ display:flex; }
+  #zoomOverlay img{
+    max-width: min(90vw, 1200px);
+    max-height: 90vh;
+    width:auto; height:auto; display:block;
+    box-shadow: 0 16px 36px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3);
+    border-radius: 6px;
+  }
+
+  /* ====== 확인 모달 ====== */
+  #confirmModal{
+    position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:2100;
+  }
+  #confirmModal.show{ display:flex; }
+  .dialog{
+    background:#fff; color:#222; border-radius:12px; min-width:260px; max-width:80vw;
+    box-shadow: 0 12px 30px rgba(0,0,0,.28);
+    padding:18px 16px;
+    font: 500 14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+  }
+  .dialog p{ margin: 4px 4px 14px; white-space:nowrap; }
+  .buttons{ display:flex; gap:10px; justify-content:flex-end; }
+  .buttons button{
+    border:none; border-radius:8px; padding:9px 14px; cursor:pointer;
+    font-weight:600;
+  }
+  .buttons .yes{ background:#222; color:#fff; }
+  .buttons .no{ background:#ececec; color:#222; }
 </style>
 </head>
 <body>
@@ -108,20 +122,26 @@
     <div class="hole-area">🕳️</div>
   </div>
 
-  <!-- 모바일 확대 오버레이 -->
-  <div id="zoomOverlay" hidden>
-    <img alt="zoomed" />
+  <!-- 확대 오버레이 -->
+  <div id="zoomOverlay">
+    <img id="zoomImg" src="" alt="">
+  </div>
+
+  <!-- 확인 모달 -->
+  <div id="confirmModal">
+    <div class="dialog">
+      <p>구경하러 다녀옵니다🚪</p>
+      <div class="buttons">
+        <button class="no" id="confirmNo">아니오</button>
+        <button class="yes" id="confirmYes">예</button>
+      </div>
+    </div>
   </div>
 
 <script>
 (() => {
   const section = document.getElementById('draggableSection');
   const hole = document.querySelector('.hole-area');
-  const overlay = document.getElementById('zoomOverlay');
-  const overlayImg = overlay.querySelector('img');
-
-  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-
   const FRAME_SRC = 'https://i.imgur.com/Sgwt5Hy.png';
 
   const imageSources = [
@@ -136,6 +156,7 @@
     "https://imgur.com/emwcull","https://imgur.com/gjj4zas"
   ];
 
+  // 링크 매핑
   const linkMap = {
     'ijesB8N':'https://marpple.shop/kr/xfworksforxfworld',
     'dRIwmfM':'https://www.instagram.com/xf_works/',
@@ -147,8 +168,9 @@
   // 셔플
   for(let i=imageSources.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[imageSources[i],imageSources[j]]=[imageSources[j],imageSources[i]];}
 
-  const items=[]; const PAD_RATIO=0.05; let zCounter=100;
-
+  // 유틸
+  const items=[]; const placed=[]; const PAD_RATIO=0.05; let zCounter=100;
+  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   function normUrl(u){
     let src=u.trim();
     if(!src.includes('i.imgur.com')) src=src.replace('imgur.com/','i.imgur.com/');
@@ -156,24 +178,57 @@
     return src;
   }
   function ptr(e){
-    const p=('touches' in e && e.touches[0])? e.touches[0] : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
+    const p=('touches' in e)? e.touches[0]:e;
     const r=section.getBoundingClientRect();
     return { x:p.clientX-r.left, y:p.clientY-r.top, clientX:p.clientX, clientY:p.clientY };
   }
-  function clamp(val,min,max){ return Math.max(min, Math.min(val, max)); }
+  function clamp(v,min,max){ return Math.max(min, Math.min(v, max)); }
 
-  // 확대 오버레이 제어(모바일 탭)
-  function openZoom(src){
-    overlayImg.src = src;
-    overlay.hidden = false;
+  // 확대 오버레이 / 확인 모달
+  const zoomOverlay = document.getElementById('zoomOverlay');
+  const zoomImg     = document.getElementById('zoomImg');
+  const confirmModal= document.getElementById('confirmModal');
+  const yesBtn = document.getElementById('confirmYes');
+  const noBtn  = document.getElementById('confirmNo');
+
+  let currentZoomLink = null; // 확대 중인 이미지의 링크(없으면 null)
+  let overlayOpen = false;
+
+  function openZoom(src, link=null){
+    currentZoomLink = link || null;
+    zoomImg.src = src;
+    zoomOverlay.classList.add('show');
+    overlayOpen = true;
   }
   function closeZoom(){
-    overlay.hidden = true;
-    overlayImg.src = '';
+    zoomOverlay.classList.remove('show');
+    confirmModal.classList.remove('show');
+    zoomImg.src = '';
+    currentZoomLink = null;
+    overlayOpen = false;
   }
-  overlay.addEventListener('click', closeZoom);
-  overlay.addEventListener('touchend', closeZoom);
+  function askGoOut(){
+    // 확인 모달 노출
+    confirmModal.classList.add('show');
+  }
 
+  // 오버레이 클릭: 링크가 있으면 확인 모달, 없으면 닫기
+  zoomOverlay.addEventListener('click', () => {
+    if (currentZoomLink) askGoOut();
+    else closeZoom();
+  });
+  // 모달 버튼
+  yesBtn.addEventListener('click', () => {
+    if (currentZoomLink) window.location.href = currentZoomLink;
+    closeZoom();
+  });
+  noBtn.addEventListener('click', () => {
+    closeZoom();
+  });
+  // ESC 닫기
+  document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && overlayOpen){ closeZoom(); }});
+
+  // 생성
   imageSources.forEach(raw=>{
     const src=normUrl(raw);
     const file=src.split('/').pop();
@@ -193,7 +248,7 @@
 
     art.appendChild(img); thumb.append(frame,art,corner); wrap.append(thumb); section.appendChild(wrap);
 
-    // 초기 배치(프레임 로드 후 정확한 크기)
+    // 초기 배치(프레임 로드 후 정확한 크기 기준)
     frame.addEventListener('load', () => {
       const secW=section.clientWidth, secH=section.clientHeight;
       const padX=secW*PAD_RATIO, padY=secH*PAD_RATIO;
@@ -204,26 +259,28 @@
       const y=padY + Math.random()*spanH;
       wrap.style.left = x+'px';
       wrap.style.top  = y+'px';
+      placed.push({x,y,w,h});
     });
 
-    // 드래그
-    let dragging=false, startOffX=0, startOffY=0, movedSum=0, resizing=false, rStartX=0, baseW=0;
+    // 드래그/클릭/리사이즈
+    let dragging=false, startOffX=0, startOffY=0, movedSum=0;
+    let resizing=false, rStartX=0, baseW=0;
 
     function isNearCorner(el, ev){
       const rect=el.getBoundingClientRect();
       const thr=18;
-      const ex=('clientX' in ev)? ev.clientX : (ev.touches? ev.touches[0].clientX : ev.changedTouches[0].clientX);
-      const ey=('clientY' in ev)? ev.clientY : (ev.touches? ev.touches[0].clientY : ev.changedTouches[0].clientY);
-      return (ex>=rect.right-thr && ey>=rect.bottom-thr);
+      return (ev.clientX>=rect.right-thr && ev.clientY>=rect.bottom-thr);
     }
 
     function down(e){
-      const isCorner = isNearCorner(wrap, e);
-      if(isCorner){ // 리사이즈 시작
-        resizing=true; rStartX=('touches' in e && e.touches[0])? e.touches[0].clientX : e.clientX;
+      if (overlayOpen) return; // 확대 중엔 배경 인터랙션 막기
+      // 리사이즈 시작?
+      if(isNearCorner(wrap, ('touches'in e? e.touches[0]:e))){
+        resizing=true; rStartX=('touches'in e? e.touches[0].clientX:e.clientX);
         baseW=wrap.offsetWidth; wrap.style.zIndex=++zCounter; document.body.style.cursor='nwse-resize';
         e.preventDefault(); return;
       }
+      // 드래그 시작
       dragging=true; wrap.classList.add('grabbing'); thumb.classList.add('dragging'); wrap.style.zIndex=++zCounter;
       const p=ptr(e);
       startOffX = p.x - wrap.offsetLeft;
@@ -233,23 +290,8 @@
     }
 
     function onMove(e){
-      // 커서 아이콘 업데이트
       if(!dragging && !resizing){
-        const near = isNearCorner(wrap,e);
-        wrap.style.cursor = near ? 'nwse-resize' : 'grab';
-        return;
-      }
-      if(resizing){
-        const cx=('touches' in e && e.touches[0])? e.touches[0].clientX : e.clientX;
-        const dx = cx - rStartX;
-        let newW = Math.max(120, baseW + dx); // 최소 120px
-        wrap.style.width = newW + 'px';
-        // 경계 클램프
-        const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
-        const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
-        wrap.style.left = clamp(wrap.offsetLeft, 0, maxX) + 'px';
-        wrap.style.top  = clamp(wrap.offsetTop , 0, maxY) + 'px';
-        e.preventDefault();
+        wrap.style.cursor = isNearCorner(wrap,('touches'in e? e.touches[0]:e)) ? 'nwse-resize' : (wrap.classList.contains('grabbing')?'grabbing':'grab');
         return;
       }
       if(dragging){
@@ -267,53 +309,58 @@
         wrap.style.left = nx + 'px';
         wrap.style.top  = ny + 'px';
 
-        // 구멍이 화면에 보일 때만 체크(모바일은 display:none)
-        if(hole && hole.offsetParent !== null){
-          const holeRect = hole.getBoundingClientRect();
-          const inside = p.clientX>=holeRect.left && p.clientX<=holeRect.right && p.clientY>=holeRect.top && p.clientY<=holeRect.bottom;
-          wrap.style.opacity = inside ? '0.5' : '1';
-        }
-        e.preventDefault();
+        // 포인터가 구멍 안에 있을 때만 50% 투명
+        const holeRect = hole.getBoundingClientRect();
+        const inside = p.clientX>=holeRect.left && p.clientX<=holeRect.right && p.clientY>=holeRect.top && p.clientY<=holeRect.bottom;
+        wrap.style.opacity = inside ? '0.5' : '1';
+      }
+      if(resizing){
+        const cx=('touches'in e? e.touches[0].clientX:e.clientX);
+        const dx = (cx - rStartX);
+        let newW = Math.max(120, baseW + dx); // 최소 120px
+        wrap.style.width = newW + 'px';
+
+        // 리사이즈 중에도 경계 클램프
+        const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
+        const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
+        wrap.style.left = clamp(wrap.offsetLeft, 0, maxX) + 'px';
+        wrap.style.top  = clamp(wrap.offsetTop , 0, maxY) + 'px';
       }
     }
 
     function onUp(e){
-      if(resizing){
-        resizing=false; document.body.style.cursor='';
-        e.preventDefault();
-      }
       if(dragging){
         wrap.classList.remove('grabbing'); thumb.classList.remove('dragging');
         const p=ptr(e);
+        const holeRect = hole.getBoundingClientRect();
+        const inside = p.clientX>=holeRect.left && p.clientX<=holeRect.right && p.clientY>=holeRect.top && p.clientY<=holeRect.bottom;
         const wasClick = movedSum <= 4;
         wrap.style.opacity='1';
         dragging=false;
 
-        // 클릭 처리
-        if(wasClick){
-          if(linkMap[key]){
-            window.location.href = linkMap[key];
-          }else if(isTouch){
-            // 모바일: 링크 없으면 확대 오버레이 토글
-            openZoom(img.src);
-          }
-        }else{
-          // 드래그 종료 시, 구멍에 "정확히" 들어온 경우에만 제거
-          if(hole && hole.offsetParent !== null){
-            const holeRect = hole.getBoundingClientRect();
-            const inside = p.clientX>=holeRect.left && p.clientX<=holeRect.right && p.clientY>=holeRect.top && p.clientY<=holeRect.bottom;
-            if(inside){
-              wrap.style.transition='opacity .22s ease, transform .22s ease';
-              wrap.style.opacity='0'; wrap.style.transform='scale(.1)';
-              setTimeout(()=>wrap.remove(),220);
-            }
-          }
+        if (wasClick){
+          // ✅ 새 플로우: 무조건 먼저 확대
+          const link = linkMap[key] || null;
+          openZoom(img.src, link);
+          return;
         }
-        e.preventDefault();
+        if(!wasClick && inside){
+          wrap.style.transition='opacity .22s ease, transform .22s ease';
+          wrap.style.opacity='0'; wrap.style.transform='scale(.1)';
+          setTimeout(()=>wrap.remove(),220);
+        }
       }
+      if(resizing){ resizing=false; document.body.style.cursor=''; }
     }
 
-    // 마우스 + 터치 모두 연결 (모바일 사파리에서 잔상 방지: passive:false + preventDefault)
+    // 클릭(데스크탑)도 드래그 없이 끝났다면 확대되도록 보조
+    wrap.addEventListener('click', (e)=>{
+      if(overlayOpen) return;
+      // 드래그 없이 클릭만 발생했을 수도 있으니 안전망
+      openZoom(img.src, linkMap[key] || null);
+    });
+
+    // 리스트eners
     wrap.addEventListener('mousedown', down);
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -321,8 +368,6 @@
     wrap.addEventListener('touchstart', down, {passive:false});
     document.addEventListener('touchmove', onMove, {passive:false});
     document.addEventListener('touchend', onUp);
-    document.addEventListener('touchcancel', onUp);
-
     items.push(wrap);
   });
 
