@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>드래그 이미지 with frame safe-area</title>
+<style>
+  html, body{
+    margin:0; padding:0; height:100%;
+    background: aliceblue;
+    overflow:hidden;
+  }
+  #draggableSection{
+    position:relative; width:100vw; height:100vh; overflow:hidden;
+    touch-action:none; /* 전체 터치 제스처 충돌 방지 */
+  }
+
+  /* 상단 체크 필터 (투박한 체크박스) */
+  .filter-bar{
+    position:absolute; top:10px; left:50%; transform:translateX(-50%);
+    z-index:1000; color:#4d4d4d;
+    padding:6px 10px; border-radius:10px; display:flex; gap:14px;
+    font:600 12px/1 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+    backdrop-filter: blur(6px);
+  }
+  .filter-bar label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
+  .filter-bar input{ width:14px; height:14px; }
+
+  /* 아이템 */
+  .draggable-wrapper{
+    position:absolute; display:flex; align-items:center; user-select:none;
+    cursor:grab; z-index:10;
+    width:var(--item-size-default, 10vw);
+    touch-action:none; /* 개별 요소도 스크롤 제스처 차단 */
+  }
+  .draggable-wrapper.grabbing{ cursor:grabbing; }
+
+  /* 확대(모바일 더블탭/데스크탑 더블클릭) */
+  .draggable-wrapper.zoomed{
+    position:fixed !important;
+    left:50vw !important; top:50vh !important;
+    transform:translate(-50%,-50%) !important;
+    width:min(85vw, 720px) !important; /* 확대 폭 */
+    z-index:9999 !important;
+    cursor:zoom-out !important;
+  }
+
+  .thumb{
+    position:relative; width:100%; display:inline-block;
+    filter: drop-shadow(0 16px 36px rgba(0,0,0,.32)) drop-shadow(0 2px 6px rgba(0,0,0,.22));
+  }
+  .thumb .frame{ width:100%; height:auto; display:block; pointer-events:none; }
+
+  /* 프레임 내부 안전영역 */
+  .thumb .art{
+    position:absolute;
+    --inset-top:15%; --inset-right:10%; --inset-bottom:10%; --inset-left:10%;
+    top:var(--inset-top); right:var(--inset-right);
+    bottom:var(--inset-bottom); left:var(--inset-left);
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden; pointer-events:none; background:transparent;
+  }
+  .thumb .art img{ max-width:100%; max-height:100%; width:auto; height:auto; display:block; }
+
+  /* 보이지 않는 코너 리사이즈 핫영역(표시 X) */
+  .resize-corner{
+    position:absolute; right:0; bottom:0; width:18px; height:18px;
+    pointer-events:auto; background:transparent;
+  }
+
+  /* 제거용 구멍 */
+  .hole-area{
+    position:absolute; bottom:10px; right:40px;
+    font-size:140px; pointer-events:none; z-index:5;
+  }
+
+  /* ---- 개별 폭 오버라이드 ---- */
+  .img-N0TBWZP{width:15vw}.img-jZc9E5a{width:12vw}.img-d41PtBI{width:8vw}
+  .img-qBOCOTT{width:18vw}.img-Cl9eFr5{width:10vw}.img-ijesB8N{width:20vw}
+  .img-dRIwmfM{width:9.5vw}.img-4giNzpA{width:12vw}.img-rdRSnS1{width:12vw}
+  .img-WGeDvn2{width:12vw}.img-6wzn6e3{width:25vw}.img-1rvAWro{width:15.5vw}
+  .img-tKIIpBq{width:11vw}.img-qPu22yR{width:20vw}.img-tzJYned{width:15.5vw}
+  .img-Dku5N18{width:7vw}.img-zM8d6tk{width:10vw}.img-E5n1OcX{width:10vw}
+  .img-bShUtJp{width:24vw}.img-4TUJn6x{width:10vw}.img-YIMvYed{width:10vw}
+  .img-SqjbaNc{width:18vw}.img-RUGNwRk{width:22vw}.img-aEIP80D{width:18vw}
+  .img-emwcull{width:15vw}.img-gjj4zas{width:12vw}
+</style>
+</head>
+<body>
+  <div id="draggableSection">
+    <!-- 체크 필터 -->
+    <div class="filter-bar">
+      <label><input type="checkbox" data-filter="png"> PNG</label>
+      <label><input type="checkbox" data-filter="gif"> GIF</label>
+      <label><input type="checkbox" data-filter="link"> LINK</label>
+    </div>
+    <div class="hole-area">🕳️</div>
+  </div>
+
+<script>
+(() => {
+  const section = document.getElementById('draggableSection');
+  const hole = document.querySelector('.hole-area');
+  const FRAME_SRC = 'https://i.imgur.com/Sgwt5Hy.png';
+
+  // --- 배치 파라미터 ---
+  const PAD_RATIO       = 0.05;
+  const BUFFER_PX       = 14;
+  const MAX_TRIES       = 220;
+  const SPIRAL_STEPS    = 700;
+  const GOLDEN_ANGLE    = 2.399963229728653; // 137.5°
+  const MAX_SHRINK_STEPS= 3;
+  const SHRINK_EACH     = 0.93;
+
+  const imageSources = [
+    "https://imgur.com/N0TBWZP","https://imgur.com/jZc9E5a","https://imgur.com/d41PtBI",
+    "https://imgur.com/qBOCOTT","https://imgur.com/Cl9eFr5","https://imgur.com/ijesB8N",
+    "https://imgur.com/dRIwmfM","https://i.imgur.com/4giNzpA.gif","https://imgur.com/rdRSnS1",
+    "https://imgur.com/WGeDvn2","https://imgur.com/6wzn6e3","https://imgur.com/1rvAWro",
+    "https://imgur.com/tKIIpBq","https://i.imgur.com/qPu22yR.gif","https://imgur.com/tzJYned",
+    "https://i.imgur.com/Dku5N18.gif","https://imgur.com/zM8d6tk","https://imgur.com/E5n1OcX",
+    "https://imgur.com/bShUtJp","https://imgur.com/4TUJn6x","https://imgur.com/YIMvYed",
+    "https://imgur.com/SqjbaNc","https://imgur.com/RUGNwRk","https://imgur.com/aEIP80D",
+    "https://imgur.com/emwcull","https://imgur.com/gjj4zas"
+  ];
+
+  // 링크 매핑
+  const linkMap = {
+    'ijesB8N':'https://marpple.shop/kr/xfworksforxfworld',
+    'dRIwmfM':'https://www.instagram.com/xf_works/',
+    '1rvAWro':'https://www.instagram.com/xf_works/',
+    'bShUtJp':'https://www.instagram.com/xf_works/',
+    'Dku5N18':'https://www.instagram.com/senseiwillfixit/'
+  };
+
+  // 셔플
+  for(let i=imageSources.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[imageSources[i],imageSources[j]]=[imageSources[j],imageSources[i]];}
+
+  const items=[]; const placed=[]; let zCounter=100;
+
+  const clamp=(v,min,max)=>Math.max(min,Math.min(v,max));
+  function normUrl(u){
+    let src=u.trim();
+    if(!src.includes('i.imgur.com')) src=src.replace('imgur.com/','i.imgur.com/');
+    if(!/\.(png|jpg|jpeg|gif)$/i.test(src)) src+='.png';
+    return src;
+  }
+  function localPoint(e){
+    const p=('touches' in e && e.touches[0]) ? e.touches[0] : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
+    const r=section.getBoundingClientRect();
+    return { x:p.clientX-r.left, y:p.clientY-r.top, clientX:p.clientX, clientY:p.clientY };
+  }
+
+  function collides(x,y,w,h){
+    return placed.some(p => !(x + w + BUFFER_PX < p.x || p.x + p.w + BUFFER_PX < x || y + h + BUFFER_PX < p.y || p.y + p.h + BUFFER_PX < y));
+  }
+  function spiralTry(wrap){
+    const vw=section.clientWidth, vh=section.clientHeight;
+    const padX=vw*PAD_RATIO, padY=vh*PAD_RATIO;
+    const w=wrap.offsetWidth, h=wrap.offsetHeight;
+    const cx = vw/2 - w/2, cy = vh/2 - h/2;
+    const Rmax = Math.hypot(vw, vh)/2;
+
+    for(let t=0;t<SPIRAL_STEPS;t++){
+      const r = (t/SPIRAL_STEPS) * (Rmax - Math.max(w,h));
+      const a = t * GOLDEN_ANGLE;
+      let x = cx + r*Math.cos(a);
+      let y = cy + r*Math.sin(a);
+      x = clamp(x, padX, vw - padX - w);
+      y = clamp(y, padY, vh - padY - h);
+      if(!collides(x,y,w,h)){
+        wrap.style.left = x+'px';
+        wrap.style.top  = y+'px';
+        placed.push({x,y,w,h});
+        return true;
+      }
+    }
+    return false;
+  }
+  function placeNonOverlapping(wrap){
+    const vw=section.clientWidth, vh=section.clientHeight;
+    const padX=vw*PAD_RATIO, padY=vh*PAD_RATIO;
+
+    let step=0;
+    while(step<=MAX_SHRINK_STEPS){
+      const w=wrap.offsetWidth, h=wrap.offsetHeight;
+      const spanW=Math.max(1, vw - padX*2 - w);
+      const spanH=Math.max(1, vh - padY*2 - h);
+
+      // 무작위 시도
+      for(let t=0;t<MAX_TRIES;t++){
+        const x = padX + Math.random()*spanW;
+        const y = padY + Math.random()*spanH;
+        if(!collides(x,y,w,h)){
+          wrap.style.left = x+'px';
+          wrap.style.top  = y+'px';
+          placed.push({x,y,w,h});
+          return;
+        }
+      }
+      // 나선 시도
+      if(spiralTry(wrap)) return;
+
+      // 축소 후 재시도
+      wrap.style.width = Math.max(120, w*SHRINK_EACH) + 'px';
+      step++;
+    }
+
+    // 최후: 나선 랜덤
+    const w=wrap.offsetWidth, h=wrap.offsetHeight;
+    const cx = vw/2 - w/2, cy = vh/2 - h/2;
+    const a = Math.random()*Math.PI*2;
+    const r = (Math.random()*0.35+0.15)*Math.min(vw,vh);
+    let x = cx + r*Math.cos(a);
+    let y = cy + r*Math.sin(a);
+    x = clamp(x, 0, vw - w); y = clamp(y, 0, vh - h);
+    wrap.style.left = x+'px'; wrap.style.top = y+'px';
+    placed.push({x,y,w,h});
+  }
+
+  // 생성
+  imageSources.forEach(raw=>{
+    const src=normUrl(raw);
+    const file=src.split('/').pop();
+    const key=file.split('.')[0];
+    const ext=file.split('.').pop().toLowerCase();
+
+    const wrap=document.createElement('div');
+    wrap.className='draggable-wrapper img-'+key;
+    wrap.dataset.ext=ext;
+    if(linkMap[key]) wrap.dataset.link='1';
+
+    const thumb=document.createElement('div'); thumb.className='thumb';
+    const frame=document.createElement('img'); frame.className='frame'; frame.src=FRAME_SRC;
+    const art=document.createElement('div'); art.className='art';
+    const img=document.createElement('img'); img.src=src; img.alt=key; img.draggable=false;
+    const corner=document.createElement('div'); corner.className='resize-corner';
+
+    art.appendChild(img); thumb.append(frame,art,corner); wrap.append(thumb); section.appendChild(wrap);
+
+    // 초기 배치
+    frame.addEventListener('load', () => placeNonOverlapping(wrap));
+
+    // ───────── 드래그 / 리사이즈 / 탭 분리 (마우스 + 터치) ─────────
+    let dragging=false, resizing=false;
+    let startOffX=0, startOffY=0, movedSum=0;
+    let rStartX=0, baseW=0;
+
+    let lastTapTime=0, singleTapTimer=null;
+
+    function isNearCorner(el, ev){
+      const rect=el.getBoundingClientRect();
+      const thr=18;
+      return (ev.clientX>=rect.right-thr && ev.clientY>=rect.bottom-thr);
+    }
+
+    function onPointerDown(e){
+      if (wrap.classList.contains('zoomed')) return; // 확대중엔 드래그 금지
+      const p = localPoint(e);
+
+      // 리사이즈 코너?
+      if(('clientX' in e) && isNearCorner(wrap, e)){
+        resizing=true; rStartX=e.clientX; baseW=wrap.offsetWidth;
+        wrap.style.zIndex=++zCounter; document.body.style.cursor='nwse-resize';
+        e.preventDefault(); return;
+      }
+
+      dragging=true; wrap.classList.add('grabbing'); wrap.style.zIndex=++zCounter;
+      startOffX = p.x - wrap.offsetLeft;
+      startOffY = p.y - wrap.offsetTop;
+      movedSum = 0;
+      e.preventDefault();
+    }
+
+    function onPointerMove(e){
+      if(!dragging && !resizing){
+        if('clientX' in e) wrap.style.cursor = isNearCorner(wrap,e) ? 'nwse-resize' : (wrap.classList.contains('grabbing')?'grabbing':'grab');
+        return;
+      }
+      if(dragging){
+        const p=localPoint(e);
+        let nx = p.x - startOffX;
+        let ny = p.y - startOffY;
+        const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
+        const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
+        nx = clamp(nx, 0, maxX);
+        ny = clamp(ny, 0, maxY);
+        movedSum += Math.abs(nx - wrap.offsetLeft) + Math.abs(ny - wrap.offsetTop);
+        wrap.style.left = nx + 'px';
+        wrap.style.top  = ny + 'px';
+
+        // 구멍 영역 안에서만 50% 투명
+        const holeRect = hole.getBoundingClientRect();
+        const inside = p.clientX>=holeRect.left && p.clientX<=holeRect.right && p.clientY>=holeRect.top && p.clientY<=holeRect.bottom;
+        wrap.style.opacity = inside ? '0.5' : '1';
+        if(e.cancelable) e.preventDefault();
+      }
+      if(resizing && 'clientX' in e){
+        const dx = (e.clientX - rStartX);
+        let newW = Math.max(120, baseW + dx);
+        wrap.style.width = newW + 'px';
+        const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
+        const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
+        wrap.style.left = clamp(wrap.offsetLeft, 0, maxX) + 'px';
+        wrap.style.top  = clamp(wrap.offsetTop , 0, maxY) + 'px';
+        if(e.cancelable) e.preventDefault();
+      }
+    }
+
+    function toggleZoom(){
+      if(wrap.classList.contains('zoomed')){
+        wrap.classList.remove('zoomed');
+      }else{
+        wrap.classList.add('zoomed');
+      }
+    }
+
+    function onPointerUp(e){
+      const p=localPoint(e);
+
+      if(dragging){
+        wrap.classList.remove('grabbing');
+        const holeRect = hole.getBoundingClientRect();
+        const inside = p.clientX>=holeRect.left && p.clientX<=holeRect.right && p.clientY>=holeRect.top && p.clientY<=holeRect.bottom;
+        const wasClick = movedSum <= 4;
+        wrap.style.opacity='1';
+        dragging=false;
+
+        // 탭/클릭 처리 (모바일 더블탭, 데스크탑 더블클릭과 호환)
+        const hasLink = !!wrap.dataset.link;
+        const now = Date.now();
+
+        // 더블탭(<=300ms)
+        const isDoubleTap = (now - lastTapTime) <= 300;
+        lastTapTime = now;
+
+        if(wasClick){
+          if(isDoubleTap){
+            if(singleTapTimer){ clearTimeout(singleTapTimer); singleTapTimer=null; }
+            toggleZoom();
+          }else{
+            if(hasLink){
+              // 300ms 대기 후 링크 이동(더블탭 들어오면 취소)
+              singleTapTimer = setTimeout(()=>{
+                window.location.href = linkMap[wrap.className.split('img-')[1]] || '';
+              }, 300);
+            }else{
+              toggleZoom(); // 링크 없으면 단탭으로 확대/축소
+            }
+          }
+        }else if(inside){
+          wrap.style.transition='opacity .22s ease, transform .22s ease';
+          wrap.style.opacity='0'; wrap.style.transform='scale(.1)';
+          setTimeout(()=>wrap.remove(),220);
+        }
+      }
+      if(resizing){ resizing=false; document.body.style.cursor=''; }
+    }
+
+    // 마우스
+    wrap.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('mousemove', onPointerMove, {passive:false});
+    document.addEventListener('mouseup', onPointerUp);
+
+    // 터치
+    wrap.addEventListener('touchstart', onPointerDown, {passive:false});
+    document.addEventListener('touchmove', onPointerMove, {passive:false});
+    document.addEventListener('touchend', onPointerUp);
+
+    // 데스크탑 더블클릭 확대/축소
+    wrap.addEventListener('dblclick', (e)=>{
+      if(e.detail>=2){ toggleZoom(); }
+    });
+
+    items.push(wrap);
+  });
+
+  // 필터
+  const checks = Array.from(document.querySelectorAll('.filter-bar input'));
+  function applyFilter(){
+    const on = new Set(checks.filter(c=>c.checked).map(c=>c.dataset.filter));
+    const showAll = on.size===0;
+    items.forEach(w=>{
+      const ext=(w.dataset.ext||'').toLowerCase();
+      const hasLink=w.dataset.link==='1';
+      let visible=showAll;
+      if(!showAll){
+        if(on.has('png') && ext==='png') visible=true;
+        if(on.has('gif') && ext==='gif') visible=true;
+        if(on.has('link') && hasLink)   visible=true;
+      }
+      w.style.display=visible?'block':'none';
+      w.style.pointerEvents=visible?'':'none';
+    });
+  }
+  checks.forEach(c=>c.addEventListener('change',applyFilter));
+})();
+</script>
+</body>
+</html>
