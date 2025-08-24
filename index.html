@@ -2,13 +2,22 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<title>드래그 이미지 with frame safe-area + Zoom→Confirm</title>
+<title>드래그 이미지 with frame safe-area + PointerCapture</title>
 <style>
   html, body{
     margin:0; padding:0; height:100%;
-    background:aliceblue;
+    background: aliceblue;
     overflow:hidden;
+    touch-action:none; /* iOS 사파리 드래그 잔상/스크롤 방지 */
   }
+  *{
+    -webkit-user-select:none; user-select:none;
+    -webkit-touch-callout:none;
+  }
+  img, .draggable-wrapper, .thumb, .thumb .art{
+    -webkit-user-drag:none; /* iOS 사파리 잔상 방지 */
+  }
+
   #draggableSection{
     position:relative; width:100vw; height:100vh; overflow:hidden;
   }
@@ -36,8 +45,8 @@
 
   .thumb{
     position:relative; width:100%; display:inline-block;
-    /* 맥 창 느낌의 그림자 */
-    filter: drop-shadow(0 16px 36px rgba(0,0,0,.32)) drop-shadow(0 2px 6px rgba(0,0,0,.22));
+    /* 맥 창 느낌의 그림자 (좀 더 자연스럽게) */
+    filter: drop-shadow(0 18px 40px rgba(0,0,0,.30)) drop-shadow(0 3px 10px rgba(0,0,0,.22));
   }
   .thumb .frame{ width:100%; height:auto; display:block; pointer-events:none; }
 
@@ -64,7 +73,7 @@
     font-size:140px; pointer-events:none; z-index:5;
   }
 
-  /* ===== 개별 폭 오버라이드 ===== */
+  /* ===== 개별 폭 오버라이드(필요 시 조정) ===== */
   .img-N0TBWZP{width:15vw}.img-jZc9E5a{width:12vw}.img-d41PtBI{width:8vw}
   .img-qBOCOTT{width:18vw}.img-Cl9eFr5{width:10vw}.img-ijesB8N{width:20vw}
   .img-dRIwmfM{width:9.5vw}.img-4giNzpA{width:12vw}.img-rdRSnS1{width:12vw}
@@ -104,8 +113,7 @@
   .dialog p{ margin: 4px 4px 14px; white-space:nowrap; }
   .buttons{ display:flex; gap:10px; justify-content:flex-end; }
   .buttons button{
-    border:none; border-radius:8px; padding:9px 14px; cursor:pointer;
-    font-weight:600;
+    border:none; border-radius:8px; padding:9px 14px; cursor:pointer; font-weight:600;
   }
   .buttons .yes{ background:#222; color:#fff; }
   .buttons .no{ background:#ececec; color:#222; }
@@ -169,18 +177,14 @@
   for(let i=imageSources.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[imageSources[i],imageSources[j]]=[imageSources[j],imageSources[i]];}
 
   // 유틸
-  const items=[]; const placed=[]; const PAD_RATIO=0.05; let zCounter=100;
-  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const items=[]; const PAD_RATIO=0.05; let zTop=100;
+  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
+
   function normUrl(u){
     let src=u.trim();
     if(!src.includes('i.imgur.com')) src=src.replace('imgur.com/','i.imgur.com/');
     if(!/\.(png|jpg|jpeg|gif)$/i.test(src)) src+='.png';
     return src;
-  }
-  function ptr(e){
-    const p=('touches' in e)? e.touches[0]:e;
-    const r=section.getBoundingClientRect();
-    return { x:p.clientX-r.left, y:p.clientY-r.top, clientX:p.clientX, clientY:p.clientY };
   }
   function clamp(v,min,max){ return Math.max(min, Math.min(v, max)); }
 
@@ -191,7 +195,7 @@
   const yesBtn = document.getElementById('confirmYes');
   const noBtn  = document.getElementById('confirmNo');
 
-  let currentZoomLink = null; // 확대 중인 이미지의 링크(없으면 null)
+  let currentZoomLink = null;
   let overlayOpen = false;
 
   function openZoom(src, link=null){
@@ -207,25 +211,13 @@
     currentZoomLink = null;
     overlayOpen = false;
   }
-  function askGoOut(){
-    // 확인 모달 노출
-    confirmModal.classList.add('show');
-  }
-
-  // 오버레이 클릭: 링크가 있으면 확인 모달, 없으면 닫기
+  function askGoOut(){ confirmModal.classList.add('show'); }
   zoomOverlay.addEventListener('click', () => {
     if (currentZoomLink) askGoOut();
     else closeZoom();
   });
-  // 모달 버튼
-  yesBtn.addEventListener('click', () => {
-    if (currentZoomLink) window.location.href = currentZoomLink;
-    closeZoom();
-  });
-  noBtn.addEventListener('click', () => {
-    closeZoom();
-  });
-  // ESC 닫기
+  yesBtn.addEventListener('click', () => { if (currentZoomLink) window.location.href = currentZoomLink; closeZoom(); });
+  noBtn.addEventListener('click', () => { closeZoom(); });
   document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && overlayOpen){ closeZoom(); }});
 
   // 생성
@@ -241,15 +233,15 @@
     if(linkMap[key]) wrap.dataset.link='1';
 
     const thumb=document.createElement('div'); thumb.className='thumb';
-    const frame=document.createElement('img'); frame.className='frame'; frame.src=FRAME_SRC;
+    const frame=document.createElement('img'); frame.className='frame'; frame.src=FRAME_SRC; frame.alt='frame';
     const art=document.createElement('div'); art.className='art';
     const img=document.createElement('img'); img.src=src; img.alt=key; img.draggable=false;
     const corner=document.createElement('div'); corner.className='resize-corner';
 
     art.appendChild(img); thumb.append(frame,art,corner); wrap.append(thumb); section.appendChild(wrap);
 
-    // 초기 배치(프레임 로드 후 정확한 크기 기준)
-    frame.addEventListener('load', () => {
+    // 초기 배치 (frame 로드 후 크기 기준)
+    frame.addEventListener('load', ()=>{
       const secW=section.clientWidth, secH=section.clientHeight;
       const padX=secW*PAD_RATIO, padY=secH*PAD_RATIO;
       const w=wrap.offsetWidth, h=wrap.offsetHeight;
@@ -259,119 +251,107 @@
       const y=padY + Math.random()*spanH;
       wrap.style.left = x+'px';
       wrap.style.top  = y+'px';
-      placed.push({x,y,w,h});
     });
 
-    // 드래그/클릭/리사이즈
-    let dragging=false, startOffX=0, startOffY=0, movedSum=0;
-    let resizing=false, rStartX=0, baseW=0;
+    /* === 포인터 이벤트로 통일 (겹침 동시 드래그/잔상 방지) === */
+    let mode = null; // 'drag' | 'resize' | null
+    let grabDX=0, grabDY=0, startX=0, startY=0;
+    let startLeft=0, startTop=0, startWidth=0;
+    const CLICK_THRESHOLD = 4; // px
 
-    function isNearCorner(el, ev){
-      const rect=el.getBoundingClientRect();
+    function inCorner(ev){
+      const rect=wrap.getBoundingClientRect();
       const thr=18;
-      return (ev.clientX>=rect.right-thr && ev.clientY>=rect.bottom-thr);
+      const x = ev.clientX, y = ev.clientY;
+      return (x>=rect.right-thr && y>=rect.bottom-thr);
     }
 
-    function down(e){
+    wrap.addEventListener('pointerdown', (e)=>{
       if (overlayOpen) return; // 확대 중엔 배경 인터랙션 막기
-      // 리사이즈 시작?
-      if(isNearCorner(wrap, ('touches'in e? e.touches[0]:e))){
-        resizing=true; rStartX=('touches'in e? e.touches[0].clientX:e.clientX);
-        baseW=wrap.offsetWidth; wrap.style.zIndex=++zCounter; document.body.style.cursor='nwse-resize';
-        e.preventDefault(); return;
-      }
-      // 드래그 시작
-      dragging=true; wrap.classList.add('grabbing'); thumb.classList.add('dragging'); wrap.style.zIndex=++zCounter;
-      const p=ptr(e);
-      startOffX = p.x - wrap.offsetLeft;
-      startOffY = p.y - wrap.offsetTop;
-      movedSum = 0;
-      e.preventDefault();
-    }
+      wrap.setPointerCapture(e.pointerId); // 이 포인터는 wrap만 받는다
+      wrap.style.zIndex = ++zTop;
 
-    function onMove(e){
-      if(!dragging && !resizing){
-        wrap.style.cursor = isNearCorner(wrap,('touches'in e? e.touches[0]:e)) ? 'nwse-resize' : (wrap.classList.contains('grabbing')?'grabbing':'grab');
-        return;
+      startX = e.clientX; startY = e.clientY;
+      startLeft = wrap.offsetLeft; startTop = wrap.offsetTop; startWidth = wrap.offsetWidth;
+
+      if (inCorner(e)){
+        mode = 'resize';
+        document.body.style.cursor='nwse-resize';
+      } else {
+        mode = 'drag';
+        wrap.classList.add('grabbing');
+        grabDX = e.clientX - wrap.offsetLeft;
+        grabDY = e.clientY - wrap.offsetTop;
       }
-      if(dragging){
-        const p=ptr(e);
-        let nx = p.x - startOffX;
-        let ny = p.y - startOffY;
+
+      e.preventDefault();
+    });
+
+    wrap.addEventListener('pointermove', (e)=>{
+      if (!wrap.hasPointerCapture(e.pointerId)) return;
+      if (mode === 'drag'){
+        let nx = e.clientX - grabDX;
+        let ny = e.clientY - grabDY;
 
         const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
         const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
         nx = clamp(nx, 0, maxX);
         ny = clamp(ny, 0, maxY);
 
-        movedSum += Math.abs(nx - wrap.offsetLeft) + Math.abs(ny - wrap.offsetTop);
-
         wrap.style.left = nx + 'px';
         wrap.style.top  = ny + 'px';
 
-        // 포인터가 구멍 안에 있을 때만 50% 투명
+        // 구멍 안에 있을 때만 50% 투명
         const holeRect = hole.getBoundingClientRect();
-        const inside = p.clientX>=holeRect.left && p.clientX<=holeRect.right && p.clientY>=holeRect.top && p.clientY<=holeRect.bottom;
+        const inside = (e.clientX>=holeRect.left && e.clientX<=holeRect.right && e.clientY>=holeRect.top && e.clientY<=holeRect.bottom);
         wrap.style.opacity = inside ? '0.5' : '1';
-      }
-      if(resizing){
-        const cx=('touches'in e? e.touches[0].clientX:e.clientX);
-        const dx = (cx - rStartX);
-        let newW = Math.max(120, baseW + dx); // 최소 120px
+      } else if (mode === 'resize'){
+        const dx = e.clientX - startX;
+        let newW = Math.max(120, startWidth + dx); // 최소 120px
         wrap.style.width = newW + 'px';
 
-        // 리사이즈 중에도 경계 클램프
+        // 리사이즈 중 경계 클램프
         const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
         const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
         wrap.style.left = clamp(wrap.offsetLeft, 0, maxX) + 'px';
         wrap.style.top  = clamp(wrap.offsetTop , 0, maxY) + 'px';
       }
-    }
+    });
 
-    function onUp(e){
-      if(dragging){
-        wrap.classList.remove('grabbing'); thumb.classList.remove('dragging');
-        const p=ptr(e);
-        const holeRect = hole.getBoundingClientRect();
-        const inside = p.clientX>=holeRect.left && p.clientX<=holeRect.right && p.clientY>=holeRect.top && p.clientY<=holeRect.bottom;
-        const wasClick = movedSum <= 4;
+    wrap.addEventListener('pointerup', (e)=>{
+      if (!mode) return;
+      const moved = Math.abs(e.clientX-startX)+Math.abs(e.clientY-startY);
+      const wasClick = moved <= CLICK_THRESHOLD;
+
+      // drag end
+      if (mode === 'drag'){
+        wrap.classList.remove('grabbing');
         wrap.style.opacity='1';
-        dragging=false;
 
-        if (wasClick){
-          // ✅ 새 플로우: 무조건 먼저 확대
-          const link = linkMap[key] || null;
-          openZoom(img.src, link);
-          return;
-        }
-        if(!wasClick && inside){
+        // 드롭-투-홀 (드래그일 때만)
+        const holeRect = hole.getBoundingClientRect();
+        const inside = (e.clientX>=holeRect.left && e.clientX<=holeRect.right && e.clientY>=holeRect.top && e.clientY<=holeRect.bottom);
+        if (!wasClick && inside){
           wrap.style.transition='opacity .22s ease, transform .22s ease';
           wrap.style.opacity='0'; wrap.style.transform='scale(.1)';
           setTimeout(()=>wrap.remove(),220);
         }
       }
-      if(resizing){ resizing=false; document.body.style.cursor=''; }
-    }
+      // 클릭: 항상 확대 → (링크 있으면) 두 번째 탭에서 확인 모달
+      if (wasClick){
+        openZoom(img.src, linkMap[key] || null);
+      }
 
-    // 클릭(데스크탑)도 드래그 없이 끝났다면 확대되도록 보조
-    wrap.addEventListener('click', (e)=>{
-      if(overlayOpen) return;
-      // 드래그 없이 클릭만 발생했을 수도 있으니 안전망
-      openZoom(img.src, linkMap[key] || null);
+      mode = null;
+      document.body.style.cursor='';
+      wrap.releasePointerCapture(e.pointerId);
     });
 
-    // 리스트eners
-    wrap.addEventListener('mousedown', down);
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-
-    wrap.addEventListener('touchstart', down, {passive:false});
-    document.addEventListener('touchmove', onMove, {passive:false});
-    document.addEventListener('touchend', onUp);
+    // 아이템 목록에 등록
     items.push(wrap);
   });
 
-  // 필터
+  /* ======= 필터 ======= */
   const checks = Array.from(document.querySelectorAll('.filter-bar input'));
   function applyFilter(){
     const on = new Set(checks.filter(c=>c.checked).map(c=>c.dataset.filter));
