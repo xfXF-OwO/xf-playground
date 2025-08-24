@@ -2,20 +2,21 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<title>드래그 이미지 with frame safe-area + PointerCapture</title>
+<title>드래그 이미지 — 모바일 잔상 제거 + 고른 랜덤 배치</title>
 <style>
   html, body{
     margin:0; padding:0; height:100%;
     background: aliceblue;
     overflow:hidden;
-    touch-action:none; /* iOS 사파리 드래그 잔상/스크롤 방지 */
+    touch-action:none; /* 터치 스크롤/줌 방지(드래그 안정화) */
+    -webkit-tap-highlight-color: transparent; /* iOS 탭 하이라이트 제거 */
   }
   *{
     -webkit-user-select:none; user-select:none;
     -webkit-touch-callout:none;
   }
   img, .draggable-wrapper, .thumb, .thumb .art{
-    -webkit-user-drag:none; /* iOS 사파리 잔상 방지 */
+    -webkit-user-drag:none; user-drag:none; /* iOS 드래그 고스트 차단 */
   }
 
   #draggableSection{
@@ -40,12 +41,13 @@
     position:absolute; display:flex; align-items:center; user-select:none;
     cursor:grab; z-index:10;
     width:var(--item-size-default, 10vw);
+    will-change: transform, left, top; /* 드래그 중 부드럽게 */
   }
   .draggable-wrapper.grabbing{ cursor:grabbing; }
 
   .thumb{
     position:relative; width:100%; display:inline-block;
-    /* 맥 창 느낌의 그림자 (좀 더 자연스럽게) */
+    /* 맥 창 느낌의 그림자 */
     filter: drop-shadow(0 18px 40px rgba(0,0,0,.30)) drop-shadow(0 3px 10px rgba(0,0,0,.22));
   }
   .thumb .frame{ width:100%; height:auto; display:block; pointer-events:none; }
@@ -61,7 +63,7 @@
   }
   .thumb .art img{ max-width:100%; max-height:100%; width:auto; height:auto; display:block; }
 
-  /* 보이지 않는 코너 리사이즈 핫영역(표시 X) */
+  /* 보이지 않는 코너 리사이즈 핫영역 */
   .resize-corner{
     position:absolute; right:0; bottom:0; width:18px; height:18px;
     pointer-events:auto; background:transparent;
@@ -131,9 +133,7 @@
   </div>
 
   <!-- 확대 오버레이 -->
-  <div id="zoomOverlay">
-    <img id="zoomImg" src="" alt="">
-  </div>
+  <div id="zoomOverlay"><img id="zoomImg" src="" alt=""></div>
 
   <!-- 확인 모달 -->
   <div id="confirmModal">
@@ -173,11 +173,15 @@
     'Dku5N18':'https://www.instagram.com/senseiwillfixit/'
   };
 
+  // 전역: 기본 드래그(브라우저 DnD) 차단 -> iOS 고스트 이미지 제거
+  document.addEventListener('dragstart', e => e.preventDefault(), {passive:false});
+
   // 셔플
   for(let i=imageSources.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[imageSources[i],imageSources[j]]=[imageSources[j],imageSources[i]];}
 
-  // 유틸
-  const items=[]; const PAD_RATIO=0.05; let zTop=100;
+  const wraps=[];        // DOM 래퍼들 (필터/이벤트용)
+  const layoutItems=[];  // {wrap,w,h} 레이아웃 계산용
+  let zTop=100;
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
 
   function normUrl(u){
@@ -221,6 +225,7 @@
   document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && overlayOpen){ closeZoom(); }});
 
   // 생성
+  let readyCount = 0;
   imageSources.forEach(raw=>{
     const src=normUrl(raw);
     const file=src.split('/').pop();
@@ -238,26 +243,31 @@
     const img=document.createElement('img'); img.src=src; img.alt=key; img.draggable=false;
     const corner=document.createElement('div'); corner.className='resize-corner';
 
+    // 기본 드래그 차단(추가 안전)
+    img.addEventListener('dragstart', e=>e.preventDefault());
+
     art.appendChild(img); thumb.append(frame,art,corner); wrap.append(thumb); section.appendChild(wrap);
 
-    // 초기 배치 (frame 로드 후 크기 기준)
     frame.addEventListener('load', ()=>{
-      const secW=section.clientWidth, secH=section.clientHeight;
-      const padX=secW*PAD_RATIO, padY=secH*PAD_RATIO;
-      const w=wrap.offsetWidth, h=wrap.offsetHeight;
-      const spanW=Math.max(1, secW - padX*2 - w);
-      const spanH=Math.max(1, secH - padY*2 - h);
-      const x=padX + Math.random()*spanW;
-      const y=padY + Math.random()*spanH;
-      wrap.style.left = x+'px';
-      wrap.style.top  = y+'px';
+      // 크기 측정 후, 나중에 일괄 배치
+      layoutItems.push({wrap, key, ext, w:wrap.offsetWidth, h:wrap.offsetHeight});
+      readyCount++;
+      if(readyCount===imageSources.length){
+        if(isTouch){
+          // 모바일: 기존 랜덤 배치(살짝 여백만)
+          randomScatter(layoutItems);
+        }else{
+          // 웹: 고른 랜덤 배치
+          blueNoiseScatter(layoutItems);
+        }
+      }
     });
 
-    /* === 포인터 이벤트로 통일 (겹침 동시 드래그/잔상 방지) === */
+    /* === 포인터 이벤트로 통일 (잔상 제거 + 겹침 드래그 방지) === */
     let mode = null; // 'drag' | 'resize' | null
-    let grabDX=0, grabDY=0, startX=0, startY=0;
-    let startLeft=0, startTop=0, startWidth=0;
-    const CLICK_THRESHOLD = 4; // px
+    let startX=0, startY=0, startLeft=0, startTop=0, startWidth=0;
+    let lastTX=0, lastTY=0; // transform 델타
+    const CLICK_THRESHOLD = 4;
 
     function inCorner(ev){
       const rect=wrap.getBoundingClientRect();
@@ -267,12 +277,13 @@
     }
 
     wrap.addEventListener('pointerdown', (e)=>{
-      if (overlayOpen) return; // 확대 중엔 배경 인터랙션 막기
-      wrap.setPointerCapture(e.pointerId); // 이 포인터는 wrap만 받는다
+      if (overlayOpen) return;
+      wrap.setPointerCapture(e.pointerId);
       wrap.style.zIndex = ++zTop;
 
       startX = e.clientX; startY = e.clientY;
       startLeft = wrap.offsetLeft; startTop = wrap.offsetTop; startWidth = wrap.offsetWidth;
+      lastTX = 0; lastTY = 0;
 
       if (inCorner(e)){
         mode = 'resize';
@@ -280,41 +291,44 @@
       } else {
         mode = 'drag';
         wrap.classList.add('grabbing');
-        grabDX = e.clientX - wrap.offsetLeft;
-        grabDY = e.clientY - wrap.offsetTop;
       }
-
       e.preventDefault();
     });
 
     wrap.addEventListener('pointermove', (e)=>{
-      if (!wrap.hasPointerCapture(e.pointerId)) return;
-      if (mode === 'drag'){
-        let nx = e.clientX - grabDX;
-        let ny = e.clientY - grabDY;
+      if (!wrap.hasPointerCapture(e.pointerId) || !mode) return;
 
+      if (mode === 'drag'){
+        // 목표 절대 좌표
+        const desiredLeft = startLeft + (e.clientX - startX);
+        const desiredTop  = startTop  + (e.clientY - startY);
         const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
         const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
-        nx = clamp(nx, 0, maxX);
-        ny = clamp(ny, 0, maxY);
+        const clampedLeft = clamp(desiredLeft, 0, maxX);
+        const clampedTop  = clamp(desiredTop , 0, maxY);
 
-        wrap.style.left = nx + 'px';
-        wrap.style.top  = ny + 'px';
+        // transform으로 부드럽게 이동 (업 때만 left/top 반영)
+        lastTX = clampedLeft - startLeft;
+        lastTY = clampedTop  - startTop;
+        wrap.style.transform = `translate3d(${lastTX}px, ${lastTY}px, 0)`;
 
-        // 구멍 안에 있을 때만 50% 투명
+        // 구멍 안에서만 50% 투명
         const holeRect = hole.getBoundingClientRect();
         const inside = (e.clientX>=holeRect.left && e.clientX<=holeRect.right && e.clientY>=holeRect.top && e.clientY<=holeRect.bottom);
         wrap.style.opacity = inside ? '0.5' : '1';
+
       } else if (mode === 'resize'){
         const dx = e.clientX - startX;
-        let newW = Math.max(120, startWidth + dx); // 최소 120px
+        let newW = Math.max(120, startWidth + dx);
         wrap.style.width = newW + 'px';
 
         // 리사이즈 중 경계 클램프
         const maxX = Math.max(0, section.clientWidth  - wrap.offsetWidth);
         const maxY = Math.max(0, section.clientHeight - wrap.offsetHeight);
-        wrap.style.left = clamp(wrap.offsetLeft, 0, maxX) + 'px';
-        wrap.style.top  = clamp(wrap.offsetTop , 0, maxY) + 'px';
+        const cl = clamp(wrap.offsetLeft, 0, maxX);
+        const ct = clamp(wrap.offsetTop , 0, maxY);
+        wrap.style.left = cl + 'px';
+        wrap.style.top  = ct + 'px';
       }
     });
 
@@ -323,8 +337,13 @@
       const moved = Math.abs(e.clientX-startX)+Math.abs(e.clientY-startY);
       const wasClick = moved <= CLICK_THRESHOLD;
 
-      // drag end
       if (mode === 'drag'){
+        // transform을 실제 좌표로 커밋
+        const finalLeft = startLeft + lastTX;
+        const finalTop  = startTop  + lastTY;
+        wrap.style.transform = '';
+        wrap.style.left = finalLeft + 'px';
+        wrap.style.top  = finalTop  + 'px';
         wrap.classList.remove('grabbing');
         wrap.style.opacity='1';
 
@@ -337,9 +356,11 @@
           setTimeout(()=>wrap.remove(),220);
         }
       }
-      // 클릭: 항상 확대 → (링크 있으면) 두 번째 탭에서 확인 모달
+
+      // 클릭: 확대 → (링크 있으면) 오버레이에서 확인 후 이동
       if (wasClick){
-        openZoom(img.src, linkMap[key] || null);
+        const link = linkMap[key] || null;
+        openZoom(img.src, link);
       }
 
       mode = null;
@@ -347,16 +368,98 @@
       wrap.releasePointerCapture(e.pointerId);
     });
 
-    // 아이템 목록에 등록
-    items.push(wrap);
+    wraps.push(wrap);
   });
+
+  /* ======= 배치 알고리즘 ======= */
+
+  // 모바일: 간단 랜덤(여백 포함)
+  function randomScatter(items){
+    const W = section.clientWidth, H = section.clientHeight;
+    const padX = W*0.05, padY = H*0.05;
+    items.forEach(it=>{
+      const w = it.wrap.offsetWidth, h = it.wrap.offsetHeight;
+      const spanW = Math.max(1, W - padX*2 - w);
+      const spanH = Math.max(1, H - padY*2 - h);
+      const x = padX + Math.random()*spanW;
+      const y = padY + Math.random()*spanH;
+      it.wrap.style.left = x+'px';
+      it.wrap.style.top  = y+'px';
+    });
+  }
+
+  // 웹: 지터 그리드 + 가벼운 충돌 완화
+  function blueNoiseScatter(items){
+    const W = section.clientWidth, H = section.clientHeight;
+    const n = items.length;
+    const cols = Math.ceil(Math.sqrt(n * (W/H)));
+    const rows = Math.ceil(n / cols);
+    const cellW = W/cols, cellH = H/rows;
+
+    // 셀 센터 후보 생성 (약간 지터)
+    const centers = [];
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        const cx = (c + 0.5 + (Math.random()-0.5)*0.4) * cellW;
+        const cy = (r + 0.5 + (Math.random()-0.5)*0.4) * cellH;
+        centers.push({x:cx, y:cy});
+      }
+    }
+    // 섞고, 아이템 큰 것(면적)부터 배치
+    centers.sort(()=>Math.random()-0.5);
+    const sorted = [...items].sort((a,b)=>(b.w*b.h)-(a.w*a.h));
+
+    sorted.forEach((it,i)=>{
+      const pos = centers[i % centers.length];
+      const w = it.wrap.offsetWidth, h = it.wrap.offsetHeight;
+      let x = clamp(pos.x - w/2, 0, W - w);
+      let y = clamp(pos.y - h/2, 0, H - h);
+      it.wrap.style.left = x+'px';
+      it.wrap.style.top  = y+'px';
+    });
+
+    // 간단한 완화 2~3회: 겹치면 반씩 밀어냄
+    const passes = 3;
+    for(let p=0;p<passes;p++){
+      for(let i=0;i<n;i++){
+        for(let j=i+1;j<n;j++){
+          const a = items[i].wrap.getBoundingClientRect();
+          const b = items[j].wrap.getBoundingClientRect();
+          // 같은 부모라 좌표계 동일(뷰포트 기준) → section 기준으로 재계산
+          const ar = {x: items[i].wrap.offsetLeft, y: items[i].wrap.offsetTop, w:a.width, h:a.height};
+          const br = {x: items[j].wrap.offsetLeft, y: items[j].wrap.offsetTop, w:b.width, h:b.height};
+
+          if (ar.x < br.x+br.w && ar.x+ar.w > br.x && ar.y < br.y+br.h && ar.y+ar.h > br.y){
+            // 겹침 → 가벼운 분리
+            const overlapX = Math.min(ar.x+ar.w - br.x, br.x+br.w - ar.x);
+            const overlapY = Math.min(ar.y+ar.h - br.y, br.y+br.h - ar.y);
+            if (overlapX < overlapY){
+              const dx = overlapX/2 + 2;
+              const dir = (ar.x < br.x) ? -1 : 1;
+              const ax = clamp(ar.x + dir*dx, 0, W - ar.w);
+              const bx = clamp(br.x - dir*dx, 0, W - br.w);
+              items[i].wrap.style.left = ax+'px';
+              items[j].wrap.style.left = bx+'px';
+            } else {
+              const dy = overlapY/2 + 2;
+              const dir = (ar.y < br.y) ? -1 : 1;
+              const ay = clamp(ar.y + dir*dy, 0, H - ar.h);
+              const by = clamp(br.y - dir*dy, 0, H - br.h);
+              items[i].wrap.style.top = ay+'px';
+              items[j].wrap.style.top = by+'px';
+            }
+          }
+        }
+      }
+    }
+  }
 
   /* ======= 필터 ======= */
   const checks = Array.from(document.querySelectorAll('.filter-bar input'));
   function applyFilter(){
     const on = new Set(checks.filter(c=>c.checked).map(c=>c.dataset.filter));
     const showAll = on.size===0;
-    items.forEach(w=>{
+    wraps.forEach(w=>{
       const ext=(w.dataset.ext||'').toLowerCase();
       const hasLink=w.dataset.link==='1';
       let visible=showAll;
