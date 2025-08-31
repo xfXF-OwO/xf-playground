@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<title>드래그 이미지 — 프레임 통일(랜덤 분포)</title>
+<title>드래그 이미지 — 프레임 통일(랜덤 분포 / 모바일 탭 확대)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   html, body{
@@ -25,12 +25,13 @@
   .filter-bar label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
   .filter-bar input{ width:14px; height:14px; }
 
-  /* 아이템(배경창) — 시작 폭은 JS에서 UNIFY_W로 설정, 이후 자유 리사이즈 */
+  /* 아이템(배경창) — 시작 폭은 JS에서 UNIFY_W로 설정, 이후 자유 리사이즈(데스크톱) */
   .draggable-wrapper{
     position:absolute; display:flex; align-items:center;
     user-select:none; cursor:grab; z-index:10;
     -webkit-user-drag:none; touch-action:none;
     max-width:none;
+    transition: transform .2s ease, opacity .2s ease;
   }
   .draggable-wrapper.grabbing{ cursor:grabbing; }
 
@@ -43,7 +44,6 @@
   /* 프레임: PNG 배경, 비율은 CSS 변수로 통일 */
   .frame{
     width:100%;
-    /* ⛔ max-width 제거! 리사이즈 캡 방지 */
     aspect-ratio: var(--frame-ar, 1200/1000);
     background: var(--frame-bg) center/100% 100% no-repeat;
     position:relative;
@@ -63,10 +63,33 @@
     -webkit-user-drag:none; user-drag:none; pointer-events:none;
   }
 
-  /* 코너 리사이즈 핫영역(보이지 않음) */
+  /* 코너 리사이즈 핫영역(보이지 않음, 데스크톱 전용) */
   .resize-corner{
     position:absolute; right:0; bottom:0; width:18px; height:18px;
     pointer-events:auto; background:transparent;
+  }
+
+  /* 모바일 탭 확대 시 상태 */
+  .zoomed{
+    position:fixed !important;
+    left:50% !important; top:50% !important;
+    transform: translate(-50%, -50%) !important;
+    width:92vw !important; /* 화면 대부분 쓰도록 */
+    z-index:1000001 !important;
+    cursor:default !important;
+  }
+  .zoomed .resize-corner{ display:none !important; }
+
+  /* (선택) 확대 시 뒷배경 터치 방지용 투명 오버레이 */
+  .zoom-backdrop{
+    position:fixed; inset:0; z-index:1000000;
+    background: transparent; /* 투명 (dim 원하면 rgba 추가) */
+  }
+
+  /* 구멍(데스크톱에서만 존재, 모바일은 JS로 제거) */
+  .hole-area{
+    position:absolute; bottom:10px; right:40px;
+    font-size:140px; pointer-events:none; z-index:5;
   }
 </style>
 </head>
@@ -77,18 +100,24 @@
       <label><input type="checkbox" data-filter="gif"> GIF</label>
       <label><input type="checkbox" data-filter="link"> LINK</label>
     </div>
+    <div class="hole-area">🕳️</div>
   </div>
 
 <script>
 (() => {
   const section = document.getElementById('draggableSection');
+  const hole = document.querySelector('.hole-area');
 
   /* ===== 설정 ===== */
   const FRAME_SRC = 'https://i.imgur.com/Sgwt5Hy.png';  // 배경창 PNG(상단바 포함)
-  const UNIFY_W   = '10vw';                             // 시작 폭(이후 드래그로 제한 없이 키움)
+  const IS_TOUCH = matchMedia('(hover:none) and (pointer:coarse)').matches;
+  const UNIFY_W  = IS_TOUCH ? '22vw' : '10vw';          // ★ 모바일은 시작 크기 조금 키움
   const PAD_RATIO = 0.06;                               // 화면 가장자리 여백 비율
   const ALLOW_OVERLAP = 8;                              // 허용 겹침 px (모서리만 살짝 겹치게)
   const RELAX_PASSES  = 30;                             // 겹침 완화 반복
+
+  // 모바일에서는 구멍 제거
+  if (IS_TOUCH && hole) hole.remove();
 
   // 이미지 목록
   const imageSources = [
@@ -117,7 +146,7 @@
   function ptr(e){
     const p=('touches' in e)? e.touches[0]:e;
     const r=section.getBoundingClientRect();
-    return { x:p.clientX-r.left, y:p.clientY-r.top };
+    return { x:p.clientX-r.left, y:p.clientY-r.top, clientX:p.clientX, clientY:p.clientY };
   }
   function normUrl(u){
     let src=u.trim();
@@ -199,6 +228,30 @@
     buildAll();
   };
 
+  // 모바일 확대용 백드롭(필요 시 생성/제거)
+  let zoomBackdrop = null;
+  function ensureBackdrop(){
+    if(!zoomBackdrop){
+      zoomBackdrop = document.createElement('div');
+      zoomBackdrop.className = 'zoom-backdrop';
+      zoomBackdrop.addEventListener('click', () => {
+        // 백드롭 탭 → 현재 확대된 것 닫기
+        const z = document.querySelector('.draggable-wrapper.zoomed');
+        if(z) unzoom(z);
+      }, {passive:true});
+    }
+    return zoomBackdrop;
+  }
+
+  function zoom(wrap){
+    document.body.appendChild(ensureBackdrop());
+    wrap.classList.add('zoomed');
+  }
+  function unzoom(wrap){
+    wrap.classList.remove('zoomed');
+    if(zoomBackdrop && zoomBackdrop.parentNode) zoomBackdrop.parentNode.removeChild(zoomBackdrop);
+  }
+
   const items=[];
   function buildAll(){
     // 셔플
@@ -213,7 +266,7 @@
       const wrap=document.createElement('div');
       wrap.className='draggable-wrapper';
       wrap.dataset.ext=ext; if(linkMap[key]) wrap.dataset.link='1';
-      wrap.style.setProperty('width', UNIFY_W, 'important'); // 시작 폭만 세팅
+      wrap.style.setProperty('width', UNIFY_W, 'important'); // 시작 폭
 
       const frame=document.createElement('div'); frame.className='frame';
       const art=document.createElement('div');   art.className='art';
@@ -223,10 +276,12 @@
       art.appendChild(img); frame.append(art,corner); wrap.append(frame); section.appendChild(wrap);
       items.push(wrap);
 
-      // 드래그
+      // ---------- 드래그(공통) ----------
       let dragging=false, offX=0, offY=0, moved=0;
       const down=e=>{
-        if(isNearCorner(wrap,e)) return; // 리사이즈 우선
+        // 확대 상태에선 드래그 금지
+        if(wrap.classList.contains('zoomed')) return;
+        if(isNearCorner(wrap,e)) return; // 데스크톱 리사이즈 우선
         dragging=true; wrap.classList.add('grabbing'); wrap.style.zIndex=100+(Date.now()%100000);
         const p=ptr(e); offX=p.x-wrap.offsetLeft; offY=p.y-wrap.offsetTop; moved=0;
         e.preventDefault();
@@ -251,7 +306,26 @@
         if(dragging){
           wrap.classList.remove('grabbing'); dragging=false;
           const isClick = moved<=4;
-          if(isClick && linkMap[key]) window.location.href = linkMap[key];
+
+          if(isClick){
+            if(IS_TOUCH){
+              // 모바일: 탭 확대 토글 / 링크는 두번째 탭에 확인 후 이동
+              const hasLink = !!linkMap[key];
+              if(!wrap.classList.contains('zoomed')){
+                zoom(wrap);
+              }else{
+                if(hasLink){
+                  if(confirm('구경하러 다녀옵니다🚪')) window.location.href = linkMap[key];
+                  else unzoom(wrap); // 취소 시 닫기
+                }else{
+                  unzoom(wrap); // 링크 없으면 두번째 탭은 닫기
+                }
+              }
+            }else{
+              // 데스크톱: 링크가 있으면 클릭 이동(그 외엔 아무 동작 없음)
+              if(linkMap[key]) window.location.href = linkMap[key];
+            }
+          }
         }
         if(resizing){ resizing=false; document.body.style.cursor=''; }
       };
@@ -262,7 +336,7 @@
       document.addEventListener('touchmove',move,{passive:false});
       document.addEventListener('touchend',up);
 
-      // 리사이즈(폭만, 비율은 frame의 aspect-ratio가 유지)
+      // ---------- 리사이즈(데스크톱 전용, 폭만 변경) ----------
       let resizing=false, startX=0, baseW=0;
       function isNearCorner(el,ev){
         const r=el.getBoundingClientRect(), t=18;
@@ -271,11 +345,10 @@
         return (x>=r.right-t && y>=r.bottom-t);
       }
       wrap.addEventListener('mousedown', e=>{
+        if(!matchMedia('(hover:hover) and (pointer:fine)').matches) return; // 데스크톱만
+        if(wrap.classList.contains('zoomed')) return; // 확대 상태면 금지
         if(!isNearCorner(wrap,e)) return;
-        // 데스크톱에서만 리사이즈(모바일은 터치 드래그만)
-        if (matchMedia('(hover:hover) and (pointer:fine)').matches) {
-          resizing=true; startX=e.clientX; baseW=wrap.offsetWidth; document.body.style.cursor='nwse-resize'; e.preventDefault();
-        }
+        resizing=true; startX=e.clientX; baseW=wrap.offsetWidth; document.body.style.cursor='nwse-resize'; e.preventDefault();
       });
       document.addEventListener('mousemove', e=>{
         if(!resizing) return;
