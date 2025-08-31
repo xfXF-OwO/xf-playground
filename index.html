@@ -6,9 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   /* ===== 커스터마이즈 포인트 =====
-     1) 전체 프레임 크기: .frame { max-width: 10vw; } ← 여기 숫자만 바꾸면 됨
-     2) 겹침 정도: JS의 ALLOW_OVERLAP (px) 값 조절
-     3) 화면 가장자리 여백: JS의 PAD_RATIO 값 조절
+     1) 전체 프레임 크기: .frame { max-width: 10vw; } ← 여기 숫자만 조절
+     2) 겹침 정도: JS의 ALLOW_OVERLAP (px)
+     3) 화면 가장자리 여백: JS의 PAD_RATIO
   ================================== */
 
   html, body{
@@ -20,18 +20,19 @@
   }
   #draggableSection{ position:relative; width:100vw; height:100vh; overflow:hidden; }
 
-  /* 상단 체크 필터 */
+  /* 상단 체크 필터(항상 최상단) */
   .filter-bar{
-    position:absolute; top:10px; left:50%; transform:translateX(-50%);
-    z-index:1000; color:#4d4d4d;
+    position:fixed; top:10px; left:50%; transform:translateX(-50%);
+    z-index:1000000; color:#4d4d4d;
     padding:6px 10px; border-radius:10px; display:flex; gap:14px;
     font:600 12px/1 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
     backdrop-filter: blur(6px);
+    pointer-events:auto;
   }
   .filter-bar label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
   .filter-bar input{ width:14px; height:14px; }
 
-  /* 아이템(배경창) — 폭은 JS에서 UNIFY_W로 통일 설정 */
+  /* 아이템(배경창) — 폭은 JS의 UNIFY_W로 통일 설정 */
   .draggable-wrapper{
     position:absolute; display:flex; align-items:center;
     user-select:none; cursor:grab; z-index:10;
@@ -50,7 +51,7 @@
   /* 프레임: PNG 배경, 비율은 CSS 변수로 통일 */
   .frame{
     width:100%;
-    max-width:10vw;                     /* ★ 요청: 프레임 최대너비 10vw */
+    max-width:10vw;                     /* ★ 프레임 최대너비 10vw */
     aspect-ratio: var(--frame-ar, 1200/1000);
     background: var(--frame-bg) center/100% 100% no-repeat;
     position:relative;
@@ -75,14 +76,6 @@
     position:absolute; right:0; bottom:0; width:18px; height:18px;
     pointer-events:auto; background:transparent;
   }
-
-  /* 구멍 */
-  .hole-area{
-    position:absolute; bottom:10px; right:40px;
-    font-size:140px; pointer-events:none; z-index:5;
-  }
-  /* 모바일(터치)에서는 구멍 숨김 */
-  @media (hover:none) and (pointer:coarse){ .hole-area{ display:none !important; } }
 </style>
 </head>
 <body>
@@ -92,24 +85,18 @@
       <label><input type="checkbox" data-filter="gif"> GIF</label>
       <label><input type="checkbox" data-filter="link"> LINK</label>
     </div>
-    <div class="hole-area">🕳️</div>
   </div>
 
 <script>
 (() => {
   const section = document.getElementById('draggableSection');
-  const hole = document.querySelector('.hole-area');
 
   /* ===== 설정 ===== */
   const FRAME_SRC = 'https://i.imgur.com/Sgwt5Hy.png';  // 배경창 PNG(상단바 포함)
-  const UNIFY_W   = '10vw';                             // ★ 모든 프레임 공통 폭 (프레임 max-width와 맞춤)
-  const PAD_RATIO = 0.06;                               // 화면 가장자리 여백 비율(조금 넉넉히)
+  const UNIFY_W   = '10vw';                             // ★ 모든 프레임 공통 폭 (= .frame max-width)
+  const PAD_RATIO = 0.06;                               // 화면 가장자리 여백 비율
   const ALLOW_OVERLAP = 8;                              // 허용 겹침 px (모서리만 살짝 겹치게)
   const RELAX_PASSES  = 30;                             // 겹침 완화 반복 횟수
-
-  // 모바일이라면 구멍 제거
-  const IS_TOUCH = matchMedia('(hover:none) and (pointer:coarse)').matches;
-  if (IS_TOUCH && hole) hole.remove();
 
   // 이미지 목록
   const imageSources = [
@@ -138,7 +125,7 @@
   function ptr(e){
     const p=('touches' in e)? e.touches[0]:e;
     const r=section.getBoundingClientRect();
-    return { x:p.clientX-r.left, y:p.clientY-r.top, clientX:p.clientX, clientY:p.clientY };
+    return { x:p.clientX-r.left, y:p.clientY-r.top };
   }
   function normUrl(u){
     let src=u.trim();
@@ -236,7 +223,7 @@
       const wrap=document.createElement('div');
       wrap.className='draggable-wrapper';
       wrap.dataset.ext=ext; if(linkMap[key]) wrap.dataset.link='1';
-      wrap.style.setProperty('width', UNIFY_W, 'important'); // ★ 전부 동일 폭(=10vw)
+      wrap.style.setProperty('width', UNIFY_W, 'important'); // ★ 통일 폭(=10vw)
 
       const frame=document.createElement('div'); frame.className='frame';
       const art=document.createElement('div');   art.className='art';
@@ -267,18 +254,13 @@
           nx=clamp(nx,0,maxX); ny=clamp(ny,0,maxY);
           moved += Math.abs(nx-wrap.offsetLeft) + Math.abs(ny-wrap.offsetTop);
           wrap.style.left=nx+'px'; wrap.style.top=ny+'px';
-
-          if(!IS_TOUCH && hole){
-            const r=hole.getBoundingClientRect();
-            const inside=(p.clientX>=r.left && p.clientX<=r.right && p.clientY>=r.top && p.clientY<=r.bottom);
-            wrap.style.opacity=inside?'0.5':'1';
-          }
           e.preventDefault();
         }
       };
       const up=e=>{
         if(dragging){
-          wrap.classList.remove('grabbing'); wrap.style.opacity='1'; dragging=false;
+          wrap.classList.remove('grabbing'); dragging=false;
+          // 클릭(=드래그가 거의 없었음) → 링크면 이동
           const isClick = moved<=4;
           if(isClick && linkMap[key]) window.location.href = linkMap[key];
         }
