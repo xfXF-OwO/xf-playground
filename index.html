@@ -2,24 +2,20 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<title>드래그 이미지 — 모바일 탭 확대/링크, 안전영역 대응</title>
+<title>드래그 이미지 — 모바일 탭확대/링크, 하단바 회피</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  :root{
-    --safe-top: env(safe-area-inset-top, 0px);
-    --safe-bottom: env(safe-area-inset-bottom, 0px);
-  }
   html, body{
     margin:0; padding:0; height:100%;
     background:#fff;
     overflow:hidden;
     -webkit-user-select:none; user-select:none;
-    touch-action:none; /* 모바일 스크롤/잔상 방지 */
+    -webkit-tap-highlight-color: transparent;
+    touch-action:none; /* 모바일 드래그 잔상/스크롤 억제 */
+    padding-bottom: env(safe-area-inset-bottom, 0); /* iOS 하단바 안전영역 */
   }
-  #draggableSection{
-    position:relative; width:100vw; height:100vh; overflow:hidden;
-    padding-bottom: var(--safe-bottom); /* 시각적 여유 */
-  }
+  /* 실제 뷰포트 높이 따라감(하단바 위까지만) */
+  #draggableSection{ position:relative; width:100vw; height:100dvh; overflow:hidden; }
 
   /* 상단 체크 필터(항상 최상단) */
   .filter-bar{
@@ -28,11 +24,12 @@
     padding:6px 10px; border-radius:10px; display:flex; gap:14px;
     font:600 12px/1 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
     backdrop-filter: blur(6px);
+    background: rgba(255,255,255,.35);
   }
   .filter-bar label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
   .filter-bar input{ width:14px; height:14px; }
 
-  /* 아이템(배경창) */
+  /* 아이템(배경창) — 시작 폭은 JS에서 UNIFY_W로 설정, 이후 자유 리사이즈(데스크톱) */
   .draggable-wrapper{
     position:absolute; display:flex; align-items:center;
     user-select:none; cursor:grab; z-index:10;
@@ -70,7 +67,7 @@
     -webkit-user-drag:none; user-drag:none; pointer-events:none;
   }
 
-  /* 코너 리사이즈 핫영역(데스크톱 전용) */
+  /* 코너 리사이즈 핫영역(보이지 않음, 데스크톱 전용) */
   .resize-corner{
     position:absolute; right:0; bottom:0; width:18px; height:18px;
     pointer-events:auto; background:transparent;
@@ -79,24 +76,18 @@
   /* 모바일 탭 확대 상태 */
   .zoomed{
     position:fixed !important;
-    left:50% !important; top:calc(50% + var(--safe-top)/2) !important;
+    left:50% !important; top:50% !important;
     transform: translate(-50%, -50%) !important;
-    width:92vw !important; /* 화면 대부분 */
+    width:92vw !important;
     z-index:1000001 !important;
     cursor:default !important;
   }
   .zoomed .resize-corner{ display:none !important; }
 
-  /* 확대 시 배경 탭 차단용 백드롭(투명) */
+  /* 확대 시 뒤 터치 막는 투명 오버레이 */
   .zoom-backdrop{
     position:fixed; inset:0; z-index:1000000;
     background: transparent;
-  }
-
-  /* 구멍(데스크톱에서만) */
-  .hole-area{
-    position:absolute; bottom:10px; right:40px;
-    font-size:140px; pointer-events:none; z-index:5;
   }
 </style>
 </head>
@@ -107,36 +98,21 @@
       <label><input type="checkbox" data-filter="gif"> GIF</label>
       <label><input type="checkbox" data-filter="link"> LINK</label>
     </div>
-    <div class="hole-area">🕳️</div>
+    <!-- 휴지통(구멍) 완전 제거 -->
   </div>
 
 <script>
 (() => {
   const section = document.getElementById('draggableSection');
-  const hole = document.querySelector('.hole-area');
 
   /* ===== 설정 ===== */
   const FRAME_SRC = 'https://i.imgur.com/Sgwt5Hy.png';
-  const IS_TOUCH = matchMedia('(hover:none) and (pointer:coarse)').matches;
-  const UNIFY_W  = IS_TOUCH ? '22vw' : '10vw';   // 모바일은 시작 크기 업
+  const IS_TOUCH  = matchMedia('(hover:none) and (pointer:coarse)').matches;
+  const UNIFY_W   = IS_TOUCH ? '22vw' : '10vw';  // 모바일 시작크기 좀 더 큼
   const PAD_RATIO = 0.06;
   const ALLOW_OVERLAP = 8;
   const RELAX_PASSES  = 30;
 
-  // 모바일에서는 구멍 제거
-  if (IS_TOUCH && hole) hole.remove();
-
-  // 안전영역(px) 읽기
-  function px(v){ return parseFloat(String(v||'0').replace('px',''))||0; }
-  function safeInsets(){
-    const cs = getComputedStyle(document.documentElement);
-    return {
-      top: px(cs.getPropertyValue('--safe-top')),
-      bottom: px(cs.getPropertyValue('--safe-bottom')),
-    };
-  }
-
-  // 이미지 목록
   const imageSources = [
     "https://imgur.com/N0TBWZP","https://imgur.com/jZc9E5a","https://imgur.com/d41PtBI",
     "https://imgur.com/qBOCOTT","https://imgur.com/Cl9eFr5","https://imgur.com/ijesB8N",
@@ -149,7 +125,6 @@
     "https://imgur.com/emwcull","https://imgur.com/gjj4zas"
   ];
 
-  // 링크 매핑
   const linkMap = {
     'ijesB8N':'https://marpple.shop/kr/xfworksforxfworld',
     'dRIwmfM':'https://www.instagram.com/xf_works/',
@@ -158,31 +133,27 @@
     'Dku5N18':'https://www.instagram.com/senseiwillfixit/'
   };
 
-  // ★ GIF 강제 인식 세트(확장자 없는 Imgur 키용)
-  const GIF_KEYS = new Set(['jZc9E5a']);
-
   // ===== 유틸 =====
   const clamp=(v,min,max)=>Math.max(min,Math.min(v,max));
   function ptr(e){
-    const p=('touches' in e && e.touches[0]) ? e.touches[0] : (('changedTouches' in e && e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e);
+    const p=('touches' in e)? e.touches[0]:e;
     const r=section.getBoundingClientRect();
     return { x:p.clientX-r.left, y:p.clientY-r.top, clientX:p.clientX, clientY:p.clientY };
   }
   function normUrl(u){
     let src=u.trim();
     if(!src.includes('i.imgur.com')) src=src.replace('imgur.com/','i.imgur.com/');
-    if(!/\.(png|jpg|jpeg|gif)$/i.test(src)) src+='.png'; // 확장자 없으면 png로
+    if(!/\.(png|jpg|jpeg|gif)$/i.test(src)) src+='.png';
     return src;
   }
 
-  // 초기 랜덤 배치(안전영역 고려)
   function initialRandom(wraps){
-    const W=section.clientWidth, H=section.clientHeight, inset=safeInsets();
+    const W=section.clientWidth, H=section.clientHeight;
     const padX=W*PAD_RATIO, padY=H*PAD_RATIO;
     wraps.forEach(el=>{
       const w=el.offsetWidth, h=el.offsetHeight;
       const spanW=Math.max(1, W - padX*2 - w);
-      const spanH=Math.max(1, H - padY*2 - inset.bottom - h);
+      const spanH=Math.max(1, H - padY*2 - h);
       const x = padX + Math.random()*spanW;
       const y = padY + Math.random()*spanH;
       el.style.left = x+'px';
@@ -190,9 +161,8 @@
     });
   }
 
-  // 겹침 완화
   function relax(wraps, passes=RELAX_PASSES, allow=ALLOW_OVERLAP){
-    const W=section.clientWidth, H=section.clientHeight, n=wraps.length, inset=safeInsets();
+    const W=section.clientWidth, H=section.clientHeight, n=wraps.length;
     for(let p=0;p<passes;p++){
       let moved=false;
       for(let i=0;i<n;i++){
@@ -211,22 +181,19 @@
             }else{
               const push = Math.max(0, oy - allow)/2 + 0.5;
               const dir  = (ar.y < br.y) ? -1 : 1;
-              ar.y = clamp(ar.y + dir*push, 0, H-inset.bottom-ar.h);
-              br.y = clamp(br.y - dir*push, 0, H-inset.bottom-br.h);
+              ar.y = clamp(ar.y + dir*push, 0, H-ar.h);
+              br.y = clamp(br.y - dir*push, 0, H-br.h);
             }
             a.style.left = ar.x+'px'; a.style.top = ar.y+'px';
             b.style.left = br.x+'px'; b.style.top = br.y+'px';
             moved=true;
           }
         }
-        // 가장자리 반발(안전영역 고려)
         const margin=6;
-        if(ar.x < margin)        { ar.x = margin; a.style.left=ar.x+'px'; moved=true; }
-        if(ar.y < margin)        { ar.y = margin; a.style.top =ar.y+'px'; moved=true; }
-        if(ar.x+ar.w > W-margin) { ar.x = W-margin-ar.w; a.style.left=ar.x+'px'; moved=true; }
-        if(ar.y+ar.h > H-inset.bottom-margin){
-          ar.y = H-inset.bottom-margin-ar.h; a.style.top = ar.y+'px'; moved=true;
-        }
+        if(ar.x < margin)           { ar.x = margin; a.style.left=ar.x+'px'; moved=true; }
+        if(ar.y < margin)           { ar.y = margin; a.style.top =ar.y+'px'; moved=true; }
+        if(ar.x+ar.w > W-margin)    { ar.x = W-margin-ar.w; a.style.left=ar.x+'px'; moved=true; }
+        if(ar.y+ar.h > H-margin)    { ar.y = H-margin-ar.h; a.style.top =ar.y+'px'; moved=true; }
       }
       if(!moved) break;
     }
@@ -252,13 +219,12 @@
   };
 
   // 모바일 확대용 백드롭
-  let zoomBackdrop = null, backdropArmedAt = 0;
+  let zoomBackdrop = null;
   function ensureBackdrop(){
     if(!zoomBackdrop){
       zoomBackdrop = document.createElement('div');
       zoomBackdrop.className = 'zoom-backdrop';
-      zoomBackdrop.style.pointerEvents = 'none'; // 초기 탭 무시
-      setTimeout(()=>{ zoomBackdrop && (zoomBackdrop.style.pointerEvents='auto'); }, 200); // 200ms 후 활성화
+      zoomBackdrop.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
       zoomBackdrop.addEventListener('click', () => {
         const z = document.querySelector('.draggable-wrapper.zoomed');
         if(z) unzoom(z);
@@ -268,13 +234,11 @@
   }
   function zoom(wrap){
     document.body.appendChild(ensureBackdrop());
-    backdropArmedAt = Date.now();
     wrap.classList.add('zoomed');
   }
   function unzoom(wrap){
     wrap.classList.remove('zoomed');
     if(zoomBackdrop && zoomBackdrop.parentNode) zoomBackdrop.parentNode.removeChild(zoomBackdrop);
-    zoomBackdrop = null;
   }
 
   const items=[];
@@ -286,14 +250,12 @@
       const src=normUrl(raw);
       const file=src.split('/').pop();
       const key=file.split('.')[0];
-      const urlExt=(file.split('.').pop()||'').toLowerCase();
-      const isGif = urlExt==='gif' || GIF_KEYS.has(key);
-      const dataExt = isGif ? 'gif' : 'png';
+      const ext=file.split('.').pop().toLowerCase();
 
       const wrap=document.createElement('div');
       wrap.className='draggable-wrapper';
-      wrap.dataset.ext=dataExt; if(linkMap[key]) wrap.dataset.link='1';
-      wrap.style.setProperty('width', UNIFY_W, 'important'); // 시작 폭(드래그 리사이즈로 변경 가능)
+      wrap.dataset.ext=ext; if(linkMap[key]) wrap.dataset.link='1';
+      wrap.style.setProperty('width', UNIFY_W, 'important'); // 시작 폭
 
       const frame=document.createElement('div'); frame.className='frame';
       const art=document.createElement('div');   art.className='art';
@@ -303,43 +265,61 @@
       art.appendChild(img); frame.append(art,corner); wrap.append(frame); section.appendChild(wrap);
       items.push(wrap);
 
-      // ---------- 드래그 ----------
+      /* ====== 입력 처리 ====== */
       let dragging=false, offX=0, offY=0, moved=0;
-      const down=e=>{
+      let touchStartX=0, touchStartY=0, touchStartT=0, isTouchDrag=false;
+      let suppressClick=false; // 터치 후 중복 클릭 방지
+
+      const down=(e)=>{
         if(wrap.classList.contains('zoomed')) return;    // 확대 중엔 드래그 금지
-        if(!IS_TOUCH && isNearCorner(wrap,e)) return;    // 데스크톱 코너는 리사이즈에 맡김
+        if(isNearCorner(wrap,e)) return;                 // 데스크톱 리사이즈 우선
+
+        const p=ptr(e);
         dragging=true; wrap.classList.add('grabbing'); wrap.style.zIndex=100+(Date.now()%100000);
-        const p=ptr(e); offX=p.x-wrap.offsetLeft; offY=p.y-wrap.offsetTop; moved=0;
+        offX=p.x-wrap.offsetLeft; offY=p.y-wrap.offsetTop; moved=0;
+
+        if('touches' in e){
+          touchStartX=p.x; touchStartY=p.y; touchStartT=Date.now(); isTouchDrag=false;
+          suppressClick=true; setTimeout(()=>suppressClick=false, 350); // 같은 제스처의 click 무시
+        }
         e.preventDefault();
       };
-      const move=e=>{
+
+      const move=(e)=>{
         if(!dragging && !resizing){
-          if(!IS_TOUCH) wrap.style.cursor=isNearCorner(wrap,e)?'nwse-resize':(wrap.classList.contains('grabbing')?'grabbing':'grab');
+          wrap.style.cursor=isNearCorner(wrap,e)?'nwse-resize':(wrap.classList.contains('grabbing')?'grabbing':'grab');
           return;
         }
+        const p=ptr(e);
+        if('touches' in e){
+          const dxy=Math.hypot(p.x-touchStartX, p.y-touchStartY);
+          if(dxy>8) isTouchDrag=true;
+        }
         if(dragging){
-          const p=ptr(e);
           let nx=p.x-offX, ny=p.y-offY;
-          const inset=safeInsets();
-          const maxX=Math.max(0, section.clientWidth-wrap.offsetWidth);
-          const maxY=Math.max(0, section.clientHeight-inset.bottom-wrap.offsetHeight);
+          const maxX=Math.max(0, section.clientWidth - wrap.offsetWidth);
+          const maxY=Math.max(0, section.clientHeight- wrap.offsetHeight);
           nx=clamp(nx,0,maxX); ny=clamp(ny,0,maxY);
           moved += Math.abs(nx-wrap.offsetLeft) + Math.abs(ny-wrap.offsetTop);
           wrap.style.left=nx+'px'; wrap.style.top=ny+'px';
           e.preventDefault();
         }
       };
-      const up=e=>{
+
+      const up=(e)=>{
         if(dragging){
           wrap.classList.remove('grabbing'); dragging=false;
-          const isClick = moved<=4;
-          if(isClick){
+          const isTap = (moved<=4) && (('touches' in e) ? (Date.now()-touchStartT<350 && !isTouchDrag) : true);
+
+          if(isTap){
+            const hasLink = !!linkMap[key];
             if(IS_TOUCH){
-              const hasLink = !!linkMap[key];
+              // 모바일: 탭으로 확대/닫기/이동
               if(!wrap.classList.contains('zoomed')){
-                zoom(wrap); // 첫 탭: 확대
+                zoom(wrap);
               }else{
                 if(hasLink){
+                  // 사용자 제스처 컨텍스트 내에서 confirm → 이동
                   if(confirm('구경하러 다녀옵니다🚪')) window.location.href = linkMap[key];
                   else unzoom(wrap);
                 }else{
@@ -347,58 +327,63 @@
                 }
               }
             }else{
-              // 데스크톱: 클릭 시 링크 이동(있을 때만)
-              if(linkMap[key]) window.location.href = linkMap[key];
+              // 데스크톱: 링크가 있으면 이동
+              if(hasLink) window.location.href = linkMap[key];
             }
           }
         }
         if(resizing){ resizing=false; document.body.style.cursor=''; }
       };
+
+      // 터치 이후 발생하는 click 무시(중복 토글 방지)
+      wrap.addEventListener('click', (e)=>{ if(suppressClick){ e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+
       wrap.addEventListener('mousedown',down);
       document.addEventListener('mousemove',move);
       document.addEventListener('mouseup',up);
+
       wrap.addEventListener('touchstart',down,{passive:false});
       document.addEventListener('touchmove',move,{passive:false});
-      document.addEventListener('touchend',up);
+      document.addEventListener('touchend',up,{passive:false});
 
-      // ---------- 리사이즈(데스크톱 전용, 폭만 변경) ----------
+      /* ====== 리사이즈(데스크톱) ====== */
       let resizing=false, startX=0, baseW=0;
       function isNearCorner(el,ev){
         const r=el.getBoundingClientRect(), t=18;
-        const x=('touches'in ev && ev.touches[0])?ev.touches[0].clientX:ev.clientX;
-        const y=('touches'in ev && ev.touches[0])?ev.touches[0].clientY:ev.clientY;
+        const x=('touches'in ev?ev.touches[0].clientX:ev.clientX);
+        const y=('touches'in ev?ev.touches[0].clientY:ev.clientY);
         return (x>=r.right-t && y>=r.bottom-t);
       }
       wrap.addEventListener('mousedown', e=>{
-        if(IS_TOUCH) return; // 터치 기기에서는 리사이즈 비활성
+        if(!matchMedia('(hover:hover) and (pointer:fine)').matches) return; // 데스크톱만
         if(wrap.classList.contains('zoomed')) return;
         if(!isNearCorner(wrap,e)) return;
         resizing=true; startX=e.clientX; baseW=wrap.offsetWidth; document.body.style.cursor='nwse-resize'; e.preventDefault();
       });
       document.addEventListener('mousemove', e=>{
         if(!resizing) return;
-        const dx=e.clientX-startX; const nw=Math.max(120, baseW+dx); // 최소 120px, 최대 없음
+        const dx=e.clientX-startX; const nw=Math.max(120, baseW+dx); // 최소 120px, 상한 없음
         wrap.style.setProperty('width', nw+'px', 'important');
-        const inset=safeInsets();
         const maxX=Math.max(0, section.clientWidth-wrap.offsetWidth);
-        const maxY=Math.max(0, section.clientHeight-inset.bottom-wrap.offsetHeight);
+        const maxY=Math.max(0, section.clientHeight-wrap.offsetHeight);
         wrap.style.left = clamp(wrap.offsetLeft,0,maxX)+'px';
         wrap.style.top  = clamp(wrap.offsetTop ,0,maxY)+'px';
       });
     });
 
     // 첫 레이아웃
-    requestAnimationFrame(() => { layoutVisible(); });
+    requestAnimationFrame(layoutVisible);
 
-    // 필터 (data-ext / data-link 기준) → jZc9E5a도 GIF로 잘 걸림
+    // 필터
     const checks=[...document.querySelectorAll('.filter-bar input')];
     function applyFilter(){
       const on=new Set(checks.filter(c=>c.checked).map(c=>c.dataset.filter));
       const all = on.size===0;
       const vis=[];
       items.forEach(w=>{
-        const key=(w.querySelector('img').src.split('/').pop().split('.')[0]);
-        const ext=(w.dataset.ext||'').toLowerCase();
+        const img=w.querySelector('img');
+        const key=img.src.split('/').pop().split('.')[0];
+        const ext=(img.src.split('.').pop()||'').toLowerCase();
         const hasLink=!!linkMap[key];
         let v = all || (on.has('png')&&ext==='png') || (on.has('gif')&&ext==='gif') || (on.has('link')&&hasLink);
         w.style.display=v?'block':'none';
@@ -408,22 +393,8 @@
       requestAnimationFrame(()=>{ layoutVisible(); });
     }
     checks.forEach(c=>c.addEventListener('change',applyFilter));
-
-    // 뷰포트/툴바 변동 시(모바일 주소창 높이 변화 포함) 재클램프
-    window.addEventListener('resize', ()=>{ requestAnimationFrame(layoutVisible); }, {passive:true});
+    window.addEventListener('resize', ()=>{ requestAnimationFrame(layoutVisible); });
   }
-
-  // 프레임 비율 셋업
-  const frameProbe = new Image();
-  frameProbe.src = FRAME_SRC;
-  frameProbe.onload = () => {
-    const fw = frameProbe.naturalWidth || 1200;
-    const fh = frameProbe.naturalHeight || 1000;
-    const root = document.documentElement;
-    root.style.setProperty('--frame-ar', `${fw} / ${fh}`);
-    root.style.setProperty('--frame-bg', `url("${FRAME_SRC}")`);
-    buildAll();
-  };
 })();
 </script>
 </body>
