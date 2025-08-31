@@ -5,12 +5,6 @@
 <title>드래그 이미지 — 프레임 통일(랜덤 분포)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  /* ===== 커스터마이즈 포인트 =====
-     1) 전체 프레임 크기: .frame { max-width: 10vw; } ← 여기 숫자만 조절
-     2) 겹침 정도: JS의 ALLOW_OVERLAP (px)
-     3) 화면 가장자리 여백: JS의 PAD_RATIO
-  ================================== */
-
   html, body{
     margin:0; padding:0; height:100%;
     background:#fff;
@@ -27,12 +21,11 @@
     padding:6px 10px; border-radius:10px; display:flex; gap:14px;
     font:600 12px/1 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
     backdrop-filter: blur(6px);
-    pointer-events:auto;
   }
   .filter-bar label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
   .filter-bar input{ width:14px; height:14px; }
 
-  /* 아이템(배경창) — 폭은 JS의 UNIFY_W로 통일 설정 */
+  /* 아이템(배경창) — 시작 폭은 JS에서 UNIFY_W로 설정, 이후 자유 리사이즈 */
   .draggable-wrapper{
     position:absolute; display:flex; align-items:center;
     user-select:none; cursor:grab; z-index:10;
@@ -43,7 +36,6 @@
 
   .thumb{
     position:relative; width:100%; display:inline-block;
-    /* 맥 창 느낌의 그림자 */
     filter: drop-shadow(0 20px 44px rgba(0,0,0,.28))
             drop-shadow(0 4px 10px rgba(0,0,0,.22));
   }
@@ -51,7 +43,7 @@
   /* 프레임: PNG 배경, 비율은 CSS 변수로 통일 */
   .frame{
     width:100%;
-    max-width:10vw;                     /* ★ 프레임 최대너비 10vw */
+    /* ⛔ max-width 제거! 리사이즈 캡 방지 */
     aspect-ratio: var(--frame-ar, 1200/1000);
     background: var(--frame-bg) center/100% 100% no-repeat;
     position:relative;
@@ -71,7 +63,7 @@
     -webkit-user-drag:none; user-drag:none; pointer-events:none;
   }
 
-  /* 코너 리사이즈 핫영역(표시 X) */
+  /* 코너 리사이즈 핫영역(보이지 않음) */
   .resize-corner{
     position:absolute; right:0; bottom:0; width:18px; height:18px;
     pointer-events:auto; background:transparent;
@@ -93,10 +85,10 @@
 
   /* ===== 설정 ===== */
   const FRAME_SRC = 'https://i.imgur.com/Sgwt5Hy.png';  // 배경창 PNG(상단바 포함)
-  const UNIFY_W   = '10vw';                             // ★ 모든 프레임 공통 폭 (= .frame max-width)
+  const UNIFY_W   = '10vw';                             // 시작 폭(이후 드래그로 제한 없이 키움)
   const PAD_RATIO = 0.06;                               // 화면 가장자리 여백 비율
   const ALLOW_OVERLAP = 8;                              // 허용 겹침 px (모서리만 살짝 겹치게)
-  const RELAX_PASSES  = 30;                             // 겹침 완화 반복 횟수
+  const RELAX_PASSES  = 30;                             // 겹침 완화 반복
 
   // 이미지 목록
   const imageSources = [
@@ -134,7 +126,7 @@
     return src;
   }
 
-  // 초기 랜덤 배치 (패딩 안에서 균등 랜덤) → 이후 겹침 완화
+  // 초기 랜덤 배치
   function initialRandom(wraps){
     const W=section.clientWidth, H=section.clientHeight;
     const padX=W*PAD_RATIO, padY=H*PAD_RATIO;
@@ -149,7 +141,7 @@
     });
   }
 
-  // 겹침 완화(허용 겹침 남기고 밀어냄)
+  // 겹침 완화
   function relax(wraps, passes=RELAX_PASSES, allow=ALLOW_OVERLAP){
     const W=section.clientWidth, H=section.clientHeight, n=wraps.length;
     for(let p=0;p<passes;p++){
@@ -178,7 +170,6 @@
             moved=true;
           }
         }
-        // 가장자리 반발(프레임이 화면 밖으로 안나가게)
         const margin=6;
         if(ar.x < margin)           { ar.x = margin; a.style.left=ar.x+'px'; moved=true; }
         if(ar.y < margin)           { ar.y = margin; a.style.top =ar.y+'px'; moved=true; }
@@ -189,7 +180,6 @@
     }
   }
 
-  // 보이는 것만 재배치(랜덤 → 완화)
   function layoutVisible(){
     const vis = items.filter(el=>el.style.display!=='none');
     if(!vis.length) return;
@@ -197,7 +187,7 @@
     relax(vis);
   }
 
-  // 프레임 PNG 비율을 CSS 변수로 셋업
+  // 프레임 비율 셋업 후 빌드
   const frameImg = new Image();
   frameImg.src = FRAME_SRC;
   frameImg.onload = () => {
@@ -223,7 +213,7 @@
       const wrap=document.createElement('div');
       wrap.className='draggable-wrapper';
       wrap.dataset.ext=ext; if(linkMap[key]) wrap.dataset.link='1';
-      wrap.style.setProperty('width', UNIFY_W, 'important'); // ★ 통일 폭(=10vw)
+      wrap.style.setProperty('width', UNIFY_W, 'important'); // 시작 폭만 세팅
 
       const frame=document.createElement('div'); frame.className='frame';
       const art=document.createElement('div');   art.className='art';
@@ -260,7 +250,6 @@
       const up=e=>{
         if(dragging){
           wrap.classList.remove('grabbing'); dragging=false;
-          // 클릭(=드래그가 거의 없었음) → 링크면 이동
           const isClick = moved<=4;
           if(isClick && linkMap[key]) window.location.href = linkMap[key];
         }
@@ -273,7 +262,7 @@
       document.addEventListener('touchmove',move,{passive:false});
       document.addEventListener('touchend',up);
 
-      // 리사이즈(폭 고정비율)
+      // 리사이즈(폭만, 비율은 frame의 aspect-ratio가 유지)
       let resizing=false, startX=0, baseW=0;
       function isNearCorner(el,ev){
         const r=el.getBoundingClientRect(), t=18;
@@ -283,11 +272,14 @@
       }
       wrap.addEventListener('mousedown', e=>{
         if(!isNearCorner(wrap,e)) return;
-        resizing=true; startX=e.clientX; baseW=wrap.offsetWidth; document.body.style.cursor='nwse-resize'; e.preventDefault();
+        // 데스크톱에서만 리사이즈(모바일은 터치 드래그만)
+        if (matchMedia('(hover:hover) and (pointer:fine)').matches) {
+          resizing=true; startX=e.clientX; baseW=wrap.offsetWidth; document.body.style.cursor='nwse-resize'; e.preventDefault();
+        }
       });
       document.addEventListener('mousemove', e=>{
         if(!resizing) return;
-        const dx=e.clientX-startX; const nw=Math.max(120, baseW+dx);
+        const dx=e.clientX-startX; const nw=Math.max(120, baseW+dx); // 최소 120px, 상한 없음
         wrap.style.setProperty('width', nw+'px', 'important');
         const maxX=Math.max(0, section.clientWidth-wrap.offsetWidth);
         const maxY=Math.max(0, section.clientHeight-wrap.offsetHeight);
